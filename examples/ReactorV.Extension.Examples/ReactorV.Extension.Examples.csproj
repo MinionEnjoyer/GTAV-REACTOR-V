@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ReactorV.Extension.Examples</AssemblyName>
+    <RootNamespace>ReactorV.Extension.Examples</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ReactorV.Core\RageWebUI.Core.csproj" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+</Project>

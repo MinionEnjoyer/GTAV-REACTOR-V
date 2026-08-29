@@ -1,0 +1,4 @@
+{
+  "processWaitTimeoutSeconds": 180,
+  "maximumLifetimeSeconds": 300
+}

@@ -1,0 +1,9 @@
+{
+  "toggleKey": "F10",
+  "startVisible": false,
+  "showFirstRunSplash": true,
+  "renderer": "auto",
+  "directXFrameRate": 30,
+  "enableDevTools": false,
+  "telemetryIntervalMilliseconds": 250
+}

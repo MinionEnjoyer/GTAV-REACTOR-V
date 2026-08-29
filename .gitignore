@@ -1,0 +1,16 @@
+artifacts/
+native/build/
+native/build.pre-reactorv-*/
+package/
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
+examples/**/bin/
+examples/**/obj/
+web/dist/
+web/node_modules/
+web/node_modules.pre-reactorv-*/
+web/.vite/
+*.user
+*.suo
