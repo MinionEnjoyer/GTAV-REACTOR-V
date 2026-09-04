@@ -1497,7 +1497,8 @@ namespace RageWebUI.Harness
         {
             var requiredCopy = new[]
             {
-                "ALLIN1 Preloader",
+                "Reactor V",
+                "Services",
                 "Powered by Reactor V",
                 "Startup log",
             };

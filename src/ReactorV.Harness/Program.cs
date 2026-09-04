@@ -21,6 +21,11 @@ namespace RageWebUI.Harness
             var exitCode = 2;
             try
             {
+                if (args.Length == 2 && args[0] == "--export-chromium-credits")
+                {
+                    exitCode = ChromiumCreditsExport.Run(args[1]);
+                    return exitCode;
+                }
                 var options = HarnessOptions.Parse(args);
                 exitCode = Run(options);
             }
@@ -43,6 +48,8 @@ namespace RageWebUI.Harness
 
         private static int Run(HarnessOptions options)
         {
+            if (options.Scenario == HarnessScenario.StandalonePrefabs)
+                return StandalonePrefabHarness.Run(options);
             if (options.Scenario == HarnessScenario.ShvdnFallback)
                 return SecondaryAppDomainHarness.Run(options);
             if (options.Scenario == HarnessScenario.BootstrapHost)
@@ -355,6 +362,7 @@ namespace RageWebUI.Harness
                     case "--scenario":
                         var scenario = args[++index].ToLowerInvariant();
                         result.Scenario = scenario == "directx" ? HarnessScenario.DirectX :
+                            scenario == "standalone-prefabs" ? HarnessScenario.StandalonePrefabs :
                             scenario == "shvdn" || scenario == "shvdn-fallback"
                                 ? HarnessScenario.ShvdnFallback
                                 : scenario == "bootstrap" || scenario == "bootstrap-host"
@@ -448,6 +456,7 @@ namespace RageWebUI.Harness
 
     internal enum HarnessScenario
     {
+        StandalonePrefabs,
         DirectX,
         ShvdnFallback,
         BootstrapHost,

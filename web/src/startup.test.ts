@@ -84,7 +84,7 @@ describe('startup transition contract', () => {
     expect(parseStartupStatus({
       ...status(),
       components: status().components.filter((component) => component.id !== 'allin1'),
-    })).toBeNull()
+    })).not.toBeNull()
   })
 
   it('collapses the native and managed bridge checks into exactly three user-facing stages', () => {

@@ -6,6 +6,8 @@ $repo = Split-Path -Parent $PSScriptRoot
 $starter = Join-Path $repo 'examples/ReactorV.StandaloneStarter'
 $output = Join-Path $repo ('artifacts/ReactorV-StarterKit-0.1.0-preview-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 6))
 [IO.Directory]::CreateDirectory($output) | Out-Null
+& (Join-Path $PSScriptRoot 'Stage-ReactorLegal.ps1') -Destination (Join-Path $output 'legal') -StarterKit
+Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $output 'LICENSE')
 foreach ($name in @('StarterA', 'StarterB')) {
     & dotnet build (Join-Path $starter "$name/$name.csproj") -c Release --verbosity quiet
     if ($LASTEXITCODE) { throw "Could not build $name" }
@@ -38,6 +40,8 @@ Copy-Item -LiteralPath (Join-Path $repo 'src/ReactorV.Core/bin/Release/netstanda
     '<Project><PropertyGroup><ReactorApiDirectory>$(MSBuildThisFileDirectory)..\reference</ReactorApiDirectory></PropertyGroup></Project>')
 $index = [ordered]@{ schema_version = 1; kind = 'reactor-starter-kit'; version = '0.1.0-preview';
     includes_runtime = $false; live_game_tested = $false; keybindings = @{ StarterA = 'F6'; StarterB = 'F7' };
+    prefabs = @('settings', 'scroll-list', 'card-grid', 'status', 'searchable-catalogue', 'tabbed-settings', 'service-checklist', 'side-editor', 'confirmed-action');
+    automatic_install = $false; sample_state = 'memory-only';
     build = 'dotnet build source/StarterA/StarterA.csproj -c Release';
     check = 'powershell -NoProfile -ExecutionPolicy Bypass -File Manage-Starter.ps1 -Mode Check -GameRoot "GTA directory" -PackageRoot packages/StarterA';
     install = 'powershell -NoProfile -ExecutionPolicy Bypass -File Manage-Starter.ps1 -Mode Install -GameRoot "GTA directory" -PackageRoot packages/StarterA';
@@ -59,6 +63,7 @@ foreach ($name in @('StarterA', 'StarterB')) {
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-standalone-starter-kit.ps1') -KitRoot $output
 if ($LASTEXITCODE) { throw 'Starter installer / shared-runtime tests failed. No distributable ZIP was produced.' }
 # Exclude build outputs, logs, dependency caches, and development documentation from the ZIP.
+& (Join-Path $PSScriptRoot 'Stage-ReactorLegal.ps1') -Destination (Join-Path $output 'legal') -VerifyOnly -StarterKit
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 $archive = "$output.zip"

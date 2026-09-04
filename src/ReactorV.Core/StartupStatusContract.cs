@@ -16,6 +16,19 @@ namespace RageWebUI.Core
         public const string Method = "startup.getStatus";
         public const string EventName = "startup.status";
 
+        /// <summary>Runtime-owned services only. Consumers own their own startup content.</summary>
+        public static JObject CreateRuntimeSnapshot(bool reactorReady, bool nativeBridgeReady,
+            bool providerConnected, bool defaultMenuRequested = false, DateTime? defaultMenuDeadlineUtc = null)
+        {
+            // Keep CreateSnapshot's v1 ABI for older consumers, but never invent a
+            // required consumer for a standalone runtime installation.
+            var snapshot = CreateSnapshot(reactorReady, nativeBridgeReady, providerConnected,
+                false, defaultMenuRequested, defaultMenuDeadlineUtc);
+            snapshot.Remove("allIn1Loaded");
+            ((JArray)snapshot["components"]!).RemoveAt(3);
+            return snapshot;
+        }
+
         /// <summary>
         /// The bootstrap process is authoritative only until the authenticated
         /// managed provider connects. Afterwards it must stay silent so its

@@ -1,11 +1,13 @@
 {
   "name": "rage-web-ui",
   "version": "0.2.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:allin1": "tsc -b && vite build --mode allin1",
     "test": "vitest run"
   },
   "dependencies": {

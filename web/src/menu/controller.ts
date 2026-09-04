@@ -191,6 +191,21 @@ export class MenuController {
     return true
   }
 
+  get tabs(): Extract<MenuItem, { type: 'route' }>[] {
+    const hubId = this.currentRoute.tabParentId
+    if (!hubId) return []
+    return structuredClone(this.requireRoute(hubId).items.filter(
+      (item): item is Extract<MenuItem, { type: 'route' }> => item.type === 'route' && isAvailable(item)))
+  }
+
+  selectTab(routeId: string): boolean {
+    if (!this.tabs.some((item) => item.routeId === routeId)) return false
+    this.stack[this.stack.length - 1] = routeId
+    this.restoreFocus(routeId)
+    this.changed()
+    return true
+  }
+
   async activate(metadata: MenuControllerInvocationOptions = {}): Promise<MenuInvocation | undefined> {
     const item = this.focusedItem
     if (!item || !isAvailable(item)) return undefined

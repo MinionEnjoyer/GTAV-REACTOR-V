@@ -4,7 +4,7 @@ using ReactorV.Integration;
 
 namespace ReactorV.Starter
 {
-    // No ALLIN1, game natives, files, timers, F9 ownership, or automatic menu opening.
+    // No game natives, files, timers, F9 ownership, or automatic menu opening.
     public sealed class StarterExtension : IDisposable
     {
         private readonly IReactorExtensionHandle _handle;
@@ -12,6 +12,7 @@ namespace ReactorV.Starter
         public bool Enabled { get; private set; } = true;
         public double Strength { get; private set; } = 50;
         public int SelectedItem { get; private set; }
+        public string Query { get; private set; } = "";
 
         public StarterExtension(string id, string title)
         {
@@ -25,16 +26,27 @@ namespace ReactorV.Starter
                     value => { Strength = value; Refresh(); });
                 var reset = MenuPrefabs.ConfirmedAction(builder, "reset", "Reset example settings",
                     "Only this starter's in-memory settings will be reset. Other mods are unchanged.",
-                    (_, __) => { Enabled = true; Strength = 50; SelectedItem = 0; Refresh(); return ReactorActionResult.Success(); });
+                    (_, __) => { Enabled = true; Strength = 50; SelectedItem = 0; Query = ""; Refresh(); return MenuPrefabs.RefreshResult(); });
                 builder.AddAction(new ReactorActionDescriptor("select", "Select example item", ReactorActionRisk.Gameplay,
                     new[] { new ReactorParameterDescriptor("item", ReactorValueType.Integer,
                         required: true, minimum: 1, maximum: 32) }),
-                    (_, parameters) => { SelectedItem = parameters.Value<int>("item"); Refresh(); return ReactorActionResult.Success(); });
+                    (_, parameters) => { SelectedItem = parameters.Value<int>("item"); Refresh(); return MenuPrefabs.RefreshResult(); });
+                builder.AddAction(new ReactorActionDescriptor("search", "Filter sample items", ReactorActionRisk.Read,
+                    new[] { new ReactorParameterDescriptor("value", ReactorValueType.String, required: true, maximumLength: 80) }),
+                    (_, parameters) => { Query = parameters.Value<string>("value")!; Refresh(); return MenuPrefabs.RefreshResult(); });
+                builder.AddAction(new ReactorActionDescriptor("editor.open", "Open side editor", ReactorActionRisk.Read),
+                    (_, __) => ReactorActionResult.Success(new JObject { ["opened"] = MenuPrefabs.ShowSideEditor(_handle, "settings") }));
                 builder.AddMenu(MainMenu());
                 builder.AddMenu(MenuPrefabs.Settings("settings", "Settings", new ReactorMenuNode[] { toggle, range, reset }));
                 builder.AddMenu(MenuPrefabs.ScrollList("list", "Scrolling list", MenuPrefabs.BoundRows("select", 32)));
                 builder.AddMenu(MenuPrefabs.CardGrid("grid", "Card grid", MenuPrefabs.BoundRows("select", 8)));
                 builder.AddMenu(StatusMenu());
+                builder.AddMenu(CatalogMenu());
+                builder.AddMenu(TabsMenu());
+                builder.AddMenu(MenuPrefabs.ServiceChecklist("checklist", "Example service checklist", new[] {
+                    new ReactorStatusNode("data", "Sample data", "Ready (sample)", "success"),
+                    new ReactorStatusNode("preview", "Optional preview", "Not configured (sample)", "warning"),
+                }, .5));
             });
         }
 
@@ -50,12 +62,28 @@ namespace ReactorV.Starter
 
         private ReactorMenuDescriptor MainMenu() => new ReactorMenuDescriptor("main", _title, new ReactorMenuNode[]
         {
-            new ReactorStatusNode("independent", "Runtime", "Shared Reactor; no ALLIN1 required", "success"),
+            new ReactorStatusNode("independent", "Runtime", "Independent extension on shared Reactor", "success"),
             new ReactorSubmenuNode("settings", "Settings", "settings"),
             new ReactorSubmenuNode("list", "Scrolling list", "list"),
             new ReactorSubmenuNode("grid", "Card grid", "grid"),
             new ReactorSubmenuNode("status", "Status panel", "status"),
+            new ReactorSubmenuNode("catalog", "Searchable catalogue", "catalog"),
+            new ReactorSubmenuNode("tabs", "Tabbed settings", "tabs"),
+            new ReactorSubmenuNode("checklist", "Service checklist", "checklist"),
+            new ReactorActionNode("editor", "Compact side editor", "editor.open", "Keeps the center of the game visible; no camera manipulation."),
         });
+
+        private ReactorMenuDescriptor CatalogMenu() => MenuPrefabs.SearchableList("catalog", "Sample catalogue",
+            "search", Query, MenuPrefabs.BoundRows("select", 32));
+
+        private ReactorMenuDescriptor TabsMenu() => MenuPrefabs.TabbedSettings("tabs", "Tabbed settings", new[] {
+            new ReactorMenuTab("general", "General", new ReactorMenuNode[] {
+                new ReactorToggleNode("enabled", "Example enabled", "enabled", Enabled),
+            }),
+            new ReactorMenuTab("display", "Display", new ReactorMenuNode[] {
+                new ReactorRangeNode("strength", "Example strength", "strength", Strength, 0, 100, 5),
+            }),
+        }, "general");
 
         private ReactorMenuDescriptor StatusMenu() => MenuPrefabs.StatusPanel("status", _title + " status", new[]
         {
@@ -74,6 +102,8 @@ namespace ReactorV.Starter
                     "Only this starter's in-memory settings will be reset. Other mods are unchanged."),
             }));
             _handle.UpdateMenu(StatusMenu());
+            _handle.UpdateMenu(CatalogMenu());
+            _handle.UpdateMenu(TabsMenu());
         }
 
         public void Dispose() => _handle.Dispose();

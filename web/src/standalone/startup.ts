@@ -5,13 +5,13 @@ import type {
   StartupConsoleEntry,
   StartupPhase,
   StartupStatus,
-} from './gta/types'
+} from '../gta/types'
 
 export const STARTUP_CONSOLE_LIMIT = 48
 export const STARTUP_CONSOLE_VISIBLE_LIMIT = 12
 
 const componentIds = new Set<StartupComponentId>([
-  'reactor', 'scripthook', 'managed-bridge', 'allin1',
+  'reactor', 'scripthook', 'managed-bridge',
 ])
 const componentStates = new Set<StartupComponentState>([
   'ready', 'initializing', 'waiting', 'unavailable',
@@ -44,7 +44,7 @@ function boundedInteger(value: unknown, minimum: number, maximum: number): numbe
 }
 
 function parseComponent(value: unknown): StartupComponentStatus | null {
-  if (!isRecord(value) || !componentIds.has(value.id as StartupComponentId) ||
+  if (!isRecord(value) || !boundedText(value.id, 64) || !safeToken.test(String(value.id)) ||
     !componentStates.has(value.state as StartupComponentState)) return null
   const label = boundedText(value.label, 64)
   const detail = boundedText(value.detail, 256)
@@ -84,16 +84,13 @@ export function parseStartupStatus(value: unknown): StartupStatus | null {
     dropped === null || !Array.isArray(value.console.entries) ||
     value.console.entries.length > STARTUP_CONSOLE_LIMIT) return null
 
-  const components = value.components.map(parseComponent)
+  const components = value.components.slice(0, 33).map(parseComponent)
   const entries = value.console.entries.map(parseConsoleEntry)
   if (components.some((item) => item === null) || entries.some((item) => item === null)) return null
   const typedComponents = components as StartupComponentStatus[]
   const parsedComponentIds = new Set(typedComponents.map((item) => item.id))
-  // Standalone hosts report only their three runtime services. Older hosts
-  // additionally reported this consumer; keep both contracts readable.
-  if (typedComponents.length < 3 || typedComponents.length > 4 ||
-    parsedComponentIds.size !== typedComponents.length ||
-    ['reactor', 'scripthook', 'managed-bridge'].some((id) => !parsedComponentIds.has(id as StartupComponentId))) return null
+  if (typedComponents.length > 32 || parsedComponentIds.size !== typedComponents.length ||
+    [...componentIds].some((id) => !parsedComponentIds.has(id))) return null
 
   return {
     schemaVersion: 1,
@@ -123,16 +120,9 @@ export function selectCurrentStartupStatus(
   current: StartupStatus | null,
   next: StartupStatus,
 ): StartupStatus {
-  // While the host still reports one connected provider session, a delayed
-  // bootstrap snapshot must never demote an ALLIN1-ready managed snapshot.
-  // App clears this state on an authoritative provider disconnect, allowing
-  // a later provider generation to begin from initializing again.
-  const currentAllin1Ready = current?.components.some((component) =>
-    component.id === 'allin1' && component.state === 'ready') ?? false
-  const nextAllin1Ready = next.components.some((component) =>
-    component.id === 'allin1' && component.state === 'ready')
-  if (current?.providerConnected && currentAllin1Ready &&
-    (!next.providerConnected || !nextAllin1Ready)) return current
+  // Only authenticated provider events can end a connected session; App clears
+  // this snapshot on that boundary. Delayed bootstrap replay must not demote it.
+  if (current?.providerConnected && !next.providerConnected) return current
   if (!current || current.sessionId !== next.sessionId || next.sequence >= current.sequence) return next
   return current
 }
@@ -169,10 +159,6 @@ export function createStartupFallbackStatus(providerConnected: boolean): Startup
         state: providerConnected ? 'ready' : 'waiting',
         detail: providerConnected ? 'Managed provider connected.' : 'Waiting for ScriptHookV.',
       },
-      {
-        id: 'allin1', label: 'ALLIN1', state: 'initializing',
-        detail: providerConnected ? 'Loading the GBAY provider.' : 'Waiting for the gameplay bridge.',
-      },
     ],
     console: {
       maxEntries: STARTUP_CONSOLE_LIMIT,
@@ -192,12 +178,12 @@ export function createStartupFallbackStatus(providerConnected: boolean): Startup
 
 export function startupAutomaticMenuCopy(status: StartupStatus): string {
   return status.defaultMenuRequested
-    ? 'GBAY will open automatically when the gameplay bridge is ready.'
+    ? 'The requested menu will open when the gameplay bridge is ready.'
     : 'Initialization status only. Press F9 when the gameplay bridge is ready to open its menu.'
 }
 
 export interface StartupDisplayComponent {
-  id: 'reactor' | 'bridge' | 'allin1'
+  id: string
   label: string
   state: StartupComponentState
   detail: string
@@ -226,19 +212,11 @@ function combineBridgeStatus(status: StartupStatus): StartupDisplayComponent {
 }
 
 export function startupDisplayComponents(status: StartupStatus): StartupDisplayComponent[] {
-  const component = (id: 'reactor' | 'allin1', label: string): StartupDisplayComponent => {
-    const match = status.components.find((candidate) => candidate.id === id)
-    return {
-      id,
-      label,
-      state: match?.state ?? (id === 'reactor' ? 'ready' : 'waiting'),
-      detail: match?.detail ?? (id === 'reactor'
-        ? 'Interface host is ready.'
-        : 'Waiting for the ALLIN1 provider.'),
-    }
-  }
-  return [component('reactor', 'REACTOR V'), combineBridgeStatus(status),
-    ...(status.components.some((item) => item.id === 'allin1') ? [component('allin1', 'ALLIN1')] : [])]
+  return [
+    ...status.components.filter((item) => item.id === 'reactor'),
+    combineBridgeStatus(status),
+    ...status.components.filter((item) => !componentIds.has(item.id)),
+  ]
 }
 
 export function visibleStartupConsoleEntries(status: StartupStatus): StartupConsoleEntry[] {

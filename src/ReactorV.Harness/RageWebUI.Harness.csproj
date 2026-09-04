@@ -37,6 +37,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\examples\ReactorV.StandaloneStarter\Shared\MenuPrefabs.cs" Link="Prefabs\MenuPrefabs.cs" />
+    <Compile Include="..\..\examples\ReactorV.StandaloneStarter\Shared\StarterExtension.cs" Link="Prefabs\StarterExtension.cs" />
     <Compile Include="..\Shared\BorderConnectedBlackNormalizer.cs" Link="BorderConnectedBlackNormalizer.cs" />
     <Compile Include="..\Shared\GbayPresentationTimingPolicy.cs" Link="GbayPresentationTimingPolicy.cs" />
     <Compile Include="..\Shared\NativeWindowPresentationPolicy.cs" Link="NativeWindowPresentationPolicy.cs" />

@@ -242,6 +242,37 @@ failing extension lifecycle callback is isolated from other extensions.
 
 ## Compiled examples
 
+### Standalone prefab kit
+
+`examples/ReactorV.StandaloneStarter/Shared/MenuPrefabs.cs` is reusable source,
+compiled into each consumer. The two starter DLLs use separate extension IDs,
+independent state, and F6/F7; neither claims the shared F9 key.
+
+| Prefab | Behavior |
+| --- | --- |
+| `Settings`, `Toggle`, `Range` | Host-validated settings with typed bounds |
+| `ScrollList`, `CardGrid` | Continuous scrolling, stable host-bound row IDs |
+| `SearchableList` | Case-insensitive filtering, 80-character query, at most 255 rows, readable empty state |
+| `TabbedSettings` | Explicit tab navigation; switching tabs does not execute game actions |
+| `ServiceChecklist`, `StatusPanel` | Caller-supplied statuses and bounded progress, not guessed health |
+| `ConfirmedAction` | Host-enforced acknowledgement before mutation |
+| `ShowSideEditor` | Presents a normal menu with `reactorLayout: side-editor`; leaves the center visible |
+
+After changing state, update the affected descriptors with `handle.UpdateMenu`
+and return `MenuPrefabs.RefreshResult()`. The active presentation refreshes in
+place, retaining route/focus; a refresh must not reopen a dismissed menu. The
+browser's range/toggle display is not a substitute for host-side validation.
+Sample settings are not saved to disk; the consumer owns its persistence policy.
+The side editor does not create cameras, alter players, grant items, or claim
+another mod's input. Those are separately authorized actions owned by the mod.
+
+Build with `tools/build-standalone-starter-kit.ps1`. The exported source is rebuilt
+outside this checkout and compared against the packaged DLLs. Install checks use
+temporary fixtures, not the developer's GTA installation. The runtime and this
+optional developer kit are separate downloads; samples are never auto-installed.
+
+### Consumer compatibility fixtures
+
 [`examples/ReactorV.Extension.Examples`](../examples/ReactorV.Extension.Examples)
 contains buildable ALLIN1-style and axle-telemetry adapters. The ALLIN1 example
 shows a save-pending GBAY purchase, traffic setting, garage delivery, dynamic
@@ -249,6 +280,12 @@ menu state, and order events. The axle example shows a range control and
 rate-limited telemetry. Browser-side GBAY, axle, and weapon/suppressor examples
 are in [`web/examples`](../web/examples).
 
-The release harness registers and exercises its own ALLIN1 fixture, including
+The release harness registers and exercises its own ALLIN1 fixture with the
+separate `web/dist-allin1` browser build, including
 discovery, menu lookup, unconfirmed refusal, confirmed execution, idempotent
 replay, event subscription, input mode, and overlay visibility.
+These fixtures and their consumer UI are not shipped in the Reactor player ZIP.
+The independent `standalone-prefabs` harness runs the exact packaged neutral UI,
+opens all eight menus, captures their rendered output, checks settings through
+the typed callbacks, cancels/confirms reset, and verifies close/reopen without
+changing the second sample. It uses a synthetic host window, not a GTA process.

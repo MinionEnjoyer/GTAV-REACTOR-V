@@ -44,7 +44,7 @@ export interface DependencyStatus {
   detail: string
 }
 
-export type StartupComponentId = 'reactor' | 'scripthook' | 'managed-bridge' | 'allin1'
+export type StartupComponentId = 'reactor' | 'scripthook' | 'managed-bridge' | (string & {})
 export type StartupComponentState = 'ready' | 'initializing' | 'waiting' | 'unavailable'
 export type StartupPhase = 'reactor-starting' | 'waiting-for-provider' | 'provider-connected'
 

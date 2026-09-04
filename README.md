@@ -93,9 +93,19 @@ mod performs authorized actions on the GTA script thread.
 
 The **Starter Kit 0.1.0 preview** includes two independently built SHVDN scripts
 and source prefabs for settings, scrolling lists, grids, confirmations, and
-status panels. It includes no Reactor runtime and does not modify ALLIN1.
+status panels. Source builds now also include searchable catalogues (with empty
+states), tabbed settings, service checklists/progress, and a compact side editor.
+These examples use neutral in-memory data, not game assets or an economy.
+The kit includes no Reactor runtime and does not modify other mods.
 Both samples share one Core registry, without claiming F9 or automatically
 opening a menu. Their settings are deliberately in-memory demonstrations.
+
+Multiple mods can be registered and run together. Each uses a unique extension
+ID and owns its callbacks and state; unloading one does not uninstall Reactor
+or another mod. There is **one active menu/input owner at a time**, not several
+overlapping independently focused overlays. Only one extension may claim the
+default F9 menu; other mods can use their own keys or explicit menu navigation.
+This is lifecycle/state isolation, not a sandbox for untrusted native/.NET mods.
 
 From an extracted starter kit:
 
@@ -111,8 +121,26 @@ The installer blocks incompatible dependencies, unowned/modified files, and
 cross-mod path claims. A missing owned DLL is reported as repair-required.
 It does not claim that filesystem checks prove live graphics compatibility.
 
-Runtime/package separation from the built-in ALLIN1 presentation adapter is
-still in progress. This is not yet a final, general-purpose dependency manager.
+### Runtime versus consumer content
+
+New source builds package the neutral Reactor menu and service preloader only.
+GBAY, the ALLIN1 preloader/logo, catalogues, and consumer preview assets are not
+part of that runtime UI. `pnpm build` produces `web/dist`; the retained ALLIN1
+compatibility build is explicitly `pnpm build:allin1` → `web/dist-allin1`, used
+by the consumer regression harness, never copied to a Reactor runtime ZIP.
+Use **0.2.0 Preview 2 or newer** for this separation and the MIT/third-party
+notices. Preview 1 predates the standalone-content split.
+
+The standalone renderer can display typed menus from any registered extension.
+It does **not** reproduce GBAY's specialized presentation. Existing ALLIN1
+installations should keep their tested UI until their consumer-owned adapter is
+deployed; do not overwrite them with the standalone UI expecting the same skin.
+This is not yet a general-purpose consumer UI/dependency installer.
+
+The build rejects consumer code in the compiled module graph and scans staged
+UI hashes, file identities, and content using `reactor-ui.json`. Font license
+notices are retained; development logs, game assets, and sample mod DLLs are not
+included in the player runtime.
 
 ## Build and verify from source
 
@@ -140,3 +168,9 @@ under `web`. The browser transport uses a mock game API outside GTA.
 
 See [the renderer harness guide](docs/DIRECTX-HARNESS.md) and
 [live acceptance guide](docs/LIVE-ACCEPTANCE.md) for deeper validation.
+
+## License
+
+MIT, copyright (c) 2026 MinionEnjoyer. See [LICENSE](LICENSE).
+Included dependencies retain their own licenses; see
+[third-party notices](THIRD_PARTY_NOTICES.md) and the packaged legal directory.

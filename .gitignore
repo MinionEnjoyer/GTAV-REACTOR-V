@@ -13,6 +13,7 @@ tests/**/obj/
 examples/**/bin/
 examples/**/obj/
 web/dist/
+web/dist-allin1/
 web/node_modules/
 web/node_modules.pre-reactorv-*/
 web/.vite/

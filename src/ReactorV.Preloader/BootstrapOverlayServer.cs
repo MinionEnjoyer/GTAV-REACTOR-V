@@ -683,11 +683,10 @@ namespace ReactorV.Preloader
         }
 
         private JObject CreateStartupSnapshot(bool providerConnected) =>
-            StartupStatusContract.CreateSnapshot(
+            StartupStatusContract.CreateRuntimeSnapshot(
                 reactorReady: _contentReadiness.IsReady,
                 nativeBridgeReady: true,
                 providerConnected: providerConnected,
-                allIn1Loaded: false,
                 defaultMenuRequested:
                     Volatile.Read(ref _defaultMenuRequested) == 1,
                 defaultMenuDeadlineUtc: DateTime.TryParse(

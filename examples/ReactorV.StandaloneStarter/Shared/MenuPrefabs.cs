@@ -23,13 +23,49 @@ namespace ReactorV.Starter
         public static ReactorMenuDescriptor StatusPanel(string id, string title,
             IEnumerable<ReactorStatusNode> statuses) => new ReactorMenuDescriptor(id, title, statuses);
 
+        // Reusable patterns: no inventory, economy, models, or game-specific actions.
+        public static ReactorMenuDescriptor SearchableList(string id, string title,
+            string searchAction, string query, IEnumerable<ReactorMenuNode> rows)
+        {
+            if (query == null || query.Length > 80) throw new ArgumentOutOfRangeException(nameof(query));
+            var candidates = (rows ?? throw new ArgumentNullException(nameof(rows))).Take(256).ToArray();
+            if (candidates.Length > 255) throw new ArgumentOutOfRangeException(nameof(rows), "At most 255 rows.");
+            var ids = new HashSet<string>(StringComparer.Ordinal) { "query", "empty" };
+            foreach (var row in candidates)
+                if (row == null || !ids.Add(row.Id))
+                    throw new ArgumentException("Search rows must be non-null with unique IDs other than query/empty.", nameof(rows));
+            var matches = candidates.Where(row => row.Label.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
+            return new ReactorMenuDescriptor(id, title, new ReactorMenuNode[] {
+                new ReactorSearchNode("query", "Search", searchAction, query, "Filter items", 80),
+            }.Concat(matches.Length > 0 ? matches : new ReactorMenuNode[] {
+                new ReactorStatusNode("empty", "No matching items", "Try another search", "neutral"),
+            }));
+        }
+
+        public static ReactorMenuDescriptor TabbedSettings(string id, string title,
+            IEnumerable<ReactorMenuTab> tabs, string selectedId) => new ReactorMenuDescriptor(id, title,
+                new[] { new ReactorTabsNode("tabs", title, tabs, selectedId) });
+
+        public static ReactorMenuDescriptor ServiceChecklist(string id, string title,
+            IEnumerable<ReactorStatusNode> services, double progress) => new ReactorMenuDescriptor(id, title,
+                new ReactorMenuNode[] { new ReactorProgressNode("progress", "Initialization", progress) }
+                    .Concat(services ?? throw new ArgumentNullException(nameof(services))));
+
+        public static bool ShowSideEditor(IReactorExtensionHandle? handle, string menuId) =>
+            (handle as IReactorMenuPresentationHandle)?.TryPresentMenu(menuId,
+                new JObject { ["reactorLayout"] = "side-editor" }) ?? false;
+
+        // Refresh existing descriptors while retaining navigation; never reopen a closed menu.
+        public static ReactorActionResult RefreshResult() =>
+            ReactorActionResult.Success(new JObject { ["presentation"] = "refresh" });
+
         public static ReactorToggleNode Toggle(ReactorExtensionBuilder builder, string id,
             string label, bool value, Action<bool> apply)
         {
             if (apply == null) throw new ArgumentNullException(nameof(apply));
             builder.AddAction(new ReactorActionDescriptor(id, label, ReactorActionRisk.Gameplay,
                 new[] { new ReactorParameterDescriptor("value", ReactorValueType.Boolean, required: true) }),
-                (_, parameters) => { apply(parameters.Value<bool>("value")); return ReactorActionResult.Success(); });
+                (_, parameters) => { apply(parameters.Value<bool>("value")); return RefreshResult(); });
             return new ReactorToggleNode(id, label, id, value);
         }
 
@@ -42,7 +78,7 @@ namespace ReactorV.Starter
             builder.AddAction(new ReactorActionDescriptor(id, label, ReactorActionRisk.Gameplay,
                 new[] { new ReactorParameterDescriptor("value", ReactorValueType.Number,
                     required: true, minimum: minimum, maximum: maximum) }),
-                (_, parameters) => { apply(parameters.Value<double>("value")); return ReactorActionResult.Success(); });
+                (_, parameters) => { apply(parameters.Value<double>("value")); return RefreshResult(); });
             return node;
         }
 

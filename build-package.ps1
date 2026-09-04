@@ -959,6 +959,11 @@ try {
         Invoke-Checked $pnpm.Source 'test'
     }
     Invoke-Checked $pnpm.Source 'build'
+    if (-not $SkipHarness -and -not $SkipTests) {
+        # A separate consumer regression fixture; NEVER copied to runtime staging.
+        Invoke-Checked $pnpm.Source 'build:allin1'
+        & (Join-Path $projectRoot 'tools/test-runtime-content-boundary.ps1')
+    }
 }
 finally {
     Pop-Location
@@ -1278,6 +1283,7 @@ $externalGpuBrowserLocales | ForEach-Object {
 }
 
 Copy-Item -LiteralPath $webOutput -Destination (Join-Path $rendererRoot 'ui') -Recurse
+& (Join-Path $projectRoot 'tools/Assert-ReactorRuntimeContent.ps1') -UiRoot (Join-Path $rendererRoot 'ui')
 
 if (-not $SkipTests -and -not $SkipHarness) {
     $preloader = Join-Path $rendererRoot 'ReactorV.Preloader.exe'
@@ -1335,8 +1341,17 @@ if (-not $SkipTests -and -not $SkipHarness) {
     # mismatch.
     Invoke-Checked $packagedHarness '--scenario' 'api-contract'
     $harnessReport.suites.api_contract = 'passed'
+    Invoke-Checked $packagedHarness '--scenario' 'standalone-prefabs' `
+        '--ui' (Join-Path $rendererRoot 'ui') `
+        '--local-data-dir' (Join-Path $artifactsRoot ('harness\StandalonePrefabs-' + [Guid]::NewGuid().ToString('N')))
+    $harnessReport.suites['standalone_prefabs'] = 'passed'
+    $harnessReport.package['ui_profile'] = 'reactor-runtime'
+    $harnessReport.package['contains_consumer_ui'] = $false
 
-    # Run the exact packaged React/host pair through the Story Mode GBAY
+    # Run the separate consumer adapter with the packaged host through GBAY.
+    # Standalone renderer/startup checks above use the actual packaged React UI.
+    # The adapter is a regression fixture, not part of the Reactor package.
+    # Exercise the Story Mode GBAY
     # lifecycle. This keeps the browser cold-prepared and hidden, requires the
     # painted-presentation acknowledgement before reveal, samples every visible
     # transition for black/transparent/About/setup intermediates, drives every
@@ -1349,11 +1364,18 @@ if (-not $SkipTests -and -not $SkipHarness) {
     New-Item -ItemType Directory -Path $gbayHarnessRoot -Force | Out-Null
     $gbayStdout = Join-Path $gbayHarnessRoot 'harness.stdout.log'
     $gbayStderr = Join-Path $gbayHarnessRoot 'harness.stderr.log'
+    # UI-relative host discovery is part of production behavior. Keep that
+    # layout in an isolated consumer fixture, not in player staging.
+    $consumerRuntime = Join-Path $artifactsRoot ('harness\ConsumerRuntime-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $consumerRuntime -Force | Out-Null
+    Get-ChildItem -LiteralPath $rendererRoot -Force | Where-Object Name -ne 'ui' |
+        Copy-Item -Destination $consumerRuntime -Recurse
+    Copy-Item -LiteralPath (Join-Path $webRoot 'dist-allin1') -Destination (Join-Path $consumerRuntime 'ui') -Recurse
     $gbayProcess = Start-Process `
         -FilePath $packagedHarness `
         -ArgumentList @(
             '--scenario', 'gbay-lifecycle',
-            '--ui', ('"{0}"' -f (Join-Path $rendererRoot 'ui')),
+            '--ui', ('"{0}"' -f (Join-Path $consumerRuntime 'ui')),
             '--local-data-dir', ('"{0}"' -f $gbayHarnessRoot),
             '--gbay-cold-ready-budget-ms', "$GbayColdReadyBudgetMs",
             '--gbay-first-presentation-budget-ms', "$GbayFirstPresentationBudgetMs",
@@ -1589,7 +1611,7 @@ if (-not $SkipTests -and -not $SkipHarness) {
             '--scenario', 'bootstrap-host',
             '--duration', '15',
             '--bootstrap-warm-delay-ms', "$PersistentHostWarmDelayMs",
-            '--ui', ('"{0}"' -f (Join-Path $rendererRoot 'ui')),
+            '--ui', ('"{0}"' -f (Join-Path $consumerRuntime 'ui')),
             '--local-data-dir', ('"{0}"' -f (Join-Path $bootstrapHostHarnessRoot 'Runtime'))
         ) `
         -RedirectStandardOutput $bootstrapStdout `
@@ -1619,7 +1641,7 @@ if (-not $SkipTests -and -not $SkipHarness) {
                 '--persistent-host',
                 '--bootstrap-harness-webview-presenter',
                 '--parent-pid', "$($bootstrapHarness.Id)",
-                '--ui-dir', ('"{0}"' -f (Join-Path $rendererRoot 'ui')),
+                '--ui-dir', ('"{0}"' -f (Join-Path $consumerRuntime 'ui')),
                 '--user-data-dir', ('"{0}"' -f (Join-Path $bootstrapHostHarnessRoot 'WebView2')),
                 '--log-dir', ('"{0}"' -f (Join-Path $bootstrapHostHarnessRoot 'Logs')),
                 '--instance-id', "bootstrap-host-$([Guid]::NewGuid().ToString('N'))"
@@ -2025,6 +2047,13 @@ if (-not $SkipTests -and -not $SkipHarness) {
     Write-Host 'Reactor readiness-timeout fixture PASS: false success was withheld.'
 }
 
+$chromiumCredits = Join-Path $artifactsRoot 'Chromium-CREDITS.txt'
+Invoke-Checked (Join-Path $rendererRoot 'RageWebUI.Harness.exe') '--export-chromium-credits' $chromiumCredits
+& (Join-Path $projectRoot 'tools/Stage-ReactorLegal.ps1') -Destination (Join-Path $rendererRoot 'legal') `
+    -NativeBuild $nativeBuild -ChromiumCredits $chromiumCredits
+& (Join-Path $projectRoot 'tools/test-legal-package.ps1') -LegalRoot (Join-Path $rendererRoot 'legal')
+$harnessReport.suites.distribution_notices = 'passed'
+
 # The harness is copied into staging only so the packaged-layout smoke test can
 # exercise the exact runtime files. Remove its developer executables while
 # retaining the SharpDX assemblies now required by ReactorV.Preloader.exe's
@@ -2046,7 +2075,8 @@ $unexpectedPackagedArtifacts = @(
             ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
             (-not $_.PSIsContainer -and (
                 $_.Name -like '*Harness*' -or
-                $_.Extension -in @('.map', '.pdb', '.log', '.tmp')
+                $_.Name -match '(?i)allin1|gbay' -or
+                $_.Extension -in @('.map', '.pdb', '.log', '.tmp', '.rpf', '.ytd', '.ydr', '.yft', '.meta')
             )) -or
             ($_.PSIsContainer -and $_.Name -eq 'node_modules')
         }
@@ -2126,6 +2156,8 @@ if ($sourceMapReferences) {
     throw "Source-map references leaked into the packaged Reactor UI."
 }
 $stagingFiles = @(Get-ChildItem -LiteralPath $stagingRoot -File -Recurse)
+& (Join-Path $projectRoot 'tools/Stage-ReactorLegal.ps1') -Destination (Join-Path $rendererRoot 'legal') -VerifyOnly
+& (Join-Path $projectRoot 'tools/Assert-ReactorRuntimeContent.ps1') -UiRoot (Join-Path $rendererRoot 'ui')
 $sensitiveLocalTokens = @(Get-LocalLeakTokens)
 Assert-NoLocalPathLeaks `
     -Files $stagingFiles `

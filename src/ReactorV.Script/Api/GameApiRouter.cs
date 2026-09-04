@@ -633,11 +633,9 @@ namespace RageWebUI.Script.Api
             var scriptHookV = NativeStatus("scripthookv", "Script Hook V", "ScriptHookV.dll");
             var shvdn = ManagedStatus(
                 "scripthookvdotnet",
-                "ScriptHookVDotNet Enhanced",
+                "ScriptHookVDotNet v3",
                 typeof(GTA.Script).Assembly,
                 required: true);
-            var allin1 = ManagedStatus("allin1", "ALLIN1 client", FindManagedAssembly("ALLIN1"));
-            var lemonUi = ManagedStatus("lemonui", "LemonUI", FindManagedAssembly("LemonUI.SHVDN3"));
             var renderer = _rendererName();
             var rendererDependencies = renderer.IndexOf("WebView2", StringComparison.OrdinalIgnoreCase) >= 0
                 ? new JToken[] { NativeStatus("webview2", "WebView2 runtime", "WebView2Loader.dll") }
@@ -646,7 +644,9 @@ namespace RageWebUI.Script.Api
                     NativeStatus("compositor", "REACTOR V compositor", "RageWebUI.Native.dll"),
                     NativeStatus("chromium", "Chromium runtime", "libcef.dll"),
                 };
-            var dependencies = new JArray(scriptHookV, shvdn, allin1, lemonUi);
+            // Installed consumers belong in the extension registry, not in
+            // Reactor's runtime dependency checklist.
+            var dependencies = new JArray(scriptHookV, shvdn);
             foreach (var dependency in rendererDependencies)
             {
                 dependencies.Add(dependency);
@@ -856,15 +856,10 @@ namespace RageWebUI.Script.Api
             return Status(id, name, true, "Loaded", required: true);
         }
 
-        internal static JObject GetStartupStatus() => StartupStatusContract.CreateSnapshot(
+        internal static JObject GetStartupStatus() => StartupStatusContract.CreateRuntimeSnapshot(
             reactorReady: true,
             nativeBridgeReady: GetModuleHandle("ScriptHookV.dll") != IntPtr.Zero,
             providerConnected: true,
-            // The transition may yield to GBAY only after both the gameplay
-            // assembly and its typed default-menu extension are registered.
-            // Merely observing ALLIN1.dll is not presentation readiness.
-            allIn1Loaded: FindManagedAssembly("ALLIN1") != null &&
-                ReactorHostApi.DescribeExtension("allin1.gbay") != null,
             defaultMenuRequested: PreloadHandoff.IsDefaultMenuIntentActive(
                 Process.GetCurrentProcess().Id));
 

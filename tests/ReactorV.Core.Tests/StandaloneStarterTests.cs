@@ -21,8 +21,8 @@ public sealed class StandaloneStarterTests : IDisposable
         Assert.Equal(2, ReactorHostApi.DescribeExtensions().Count);
         Assert.False(ReactorHostApi.HasExtensionCapability(ReactorExtensionCapabilities.DefaultF9MenuOwner));
         Assert.Null(ReactorHostApi.DescribeExtension("allin1"));
-        Assert.Equal(5, ReactorHostApi.DescribeMenus("reactorv.starter-a").Count);
-        Assert.Equal(5, ReactorHostApi.DescribeMenus("reactorv.starter-b").Count);
+        Assert.Equal(8, ReactorHostApi.DescribeMenus("reactorv.starter-a").Count);
+        Assert.Equal(8, ReactorHostApi.DescribeMenus("reactorv.starter-b").Count);
 
         Assert.True(Invoke("reactorv.starter-a", "enabled", new JObject { ["value"] = false }).Succeeded);
         Assert.False(a.Enabled);

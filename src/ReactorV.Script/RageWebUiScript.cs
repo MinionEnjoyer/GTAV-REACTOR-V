@@ -1817,7 +1817,7 @@ namespace RageWebUI.Script
                 elapsedMilliseconds + ManagedStartupStatusRefreshMilliseconds;
             var snapshot = GameApiRouter.GetStartupStatus();
             PostCoreEvent(StartupStatusContract.EventName, snapshot);
-            if (snapshot.Value<bool>("allIn1Loaded") &&
+            if (snapshot.Value<bool>("providerConnected") &&
                 !snapshot.Value<bool>("defaultMenuRequested"))
                 _managedStartupStatusComplete = true;
         }
