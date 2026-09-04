@@ -43,11 +43,16 @@ $index = [ordered]@{ schema_version = 1; kind = 'reactor-starter-kit'; version =
     install = 'powershell -NoProfile -ExecutionPolicy Bypass -File Manage-Starter.ps1 -Mode Install -GameRoot "GTA directory" -PackageRoot packages/StarterA';
     uninstall = 'powershell -NoProfile -ExecutionPolicy Bypass -File Manage-Starter.ps1 -Mode Uninstall -GameRoot "GTA directory" -PackageRoot packages/StarterA' }
 [IO.File]::WriteAllText((Join-Path $output 'kit.json'), ($index | ConvertTo-Json -Depth 5))
-# Rebuild both exported projects, proving there are no hidden repository references.
+# Rebuild outside the checkout, proving there are no hidden repository references
+# or an accidental dependency on the enclosing repository's Git metadata.
+$reproRoot = Join-Path ([IO.Path]::GetTempPath()) ('ReactorV-Starter-Repro-' + [Guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($reproRoot) | Out-Null
+Copy-Item -LiteralPath (Join-Path $output 'source') -Destination (Join-Path $reproRoot 'source') -Recurse
+Copy-Item -LiteralPath (Join-Path $output 'reference') -Destination (Join-Path $reproRoot 'reference') -Recurse
 foreach ($name in @('StarterA', 'StarterB')) {
-    & dotnet build (Join-Path $output "source/$name/$name.csproj") -c Release --verbosity quiet
+    & dotnet build (Join-Path $reproRoot "source/$name/$name.csproj") -c Release --verbosity quiet
     if ($LASTEXITCODE) { throw "Exported source cannot build: $name" }
-    $built = Join-Path $output "source/$name/bin/Release/net48/ReactorV.$name.dll"
+    $built = Join-Path $reproRoot "source/$name/bin/Release/net48/ReactorV.$name.dll"
     $packaged = Join-Path $output "packages/$name/payload/scripts/ReactorV.$name.dll"
     if ((Get-FileHash $built).Hash -ne (Get-FileHash $packaged).Hash) { throw "Exported $name does not reproduce its packaged binary." }
 }

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <Version>0.1.0</Version>
     <Deterministic>true</Deterministic>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <DebugType>None</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <PathMap>$(MSBuildThisFileDirectory)=/_/starter/</PathMap>

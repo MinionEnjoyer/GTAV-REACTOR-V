@@ -75,7 +75,7 @@ single mod: other mods may depend on it.
 ## Configuration and diagnostics
 
 `scripts/ReactorV/ReactorV.json` controls the managed interface. Defaults include
-F9, `startVisible: false`, `firstRunSplash: false`, `renderer: auto`, and developer
+F9, `startVisible: false`, `showFirstRunSplash: false`, `renderer: auto`, and developer
 tools disabled. `plugins/ReactorV/ReactorV.Preloader.json` controls the early
 browser host. Edition preview packages enable the native browser route and ship
 the matching version-gated marker; keep those files together.
