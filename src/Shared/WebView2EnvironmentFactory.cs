@@ -20,10 +20,13 @@ namespace ReactorV.WebView2Host
                 Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar));
 
-        public static CoreWebView2EnvironmentOptions CreateOptions()
+        public static CoreWebView2EnvironmentOptions CreateOptions(
+            bool useSoftwareComposition = false)
         {
             var options = new CoreWebView2EnvironmentOptions(
-                string.Empty,
+                useSoftwareComposition
+                    ? WebView2ProcessFailurePolicy.SoftwareCompositionArguments
+                    : string.Empty,
                 Language,
                 null,
                 false,
@@ -36,17 +39,21 @@ namespace ReactorV.WebView2Host
             return options;
         }
 
-        public static Task<CoreWebView2Environment> CreateAsync(string userDataDirectory)
+        public static Task<CoreWebView2Environment> CreateAsync(
+            string userDataDirectory,
+            bool useSoftwareComposition = false)
         {
             var directory = NormalizeUserDataDirectory(userDataDirectory);
             Directory.CreateDirectory(directory);
             return CoreWebView2Environment.CreateAsync(
                 null,
                 directory,
-                CreateOptions());
+                CreateOptions(useSoftwareComposition));
         }
 
-        public static string Describe(string userDataDirectory)
+        public static string Describe(
+            string userDataDirectory,
+            bool useSoftwareComposition = false)
         {
             var overrideNames = new[]
             {
@@ -73,10 +80,11 @@ namespace ReactorV.WebView2Host
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "udf={0} language={1} sso=False exclusive=False extensions=False tracking=False overrides={2}",
+                "udf={0} language={1} sso=False exclusive=False extensions=False tracking=False overrides={2} composition={3}",
                 NormalizeUserDataDirectory(userDataDirectory),
                 Language,
-                activeOverrides);
+                activeOverrides,
+                useSoftwareComposition ? "software-stable" : "gpu-default");
         }
     }
 }

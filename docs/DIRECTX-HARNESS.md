@@ -5,12 +5,14 @@ without GTA. It creates a native test window and real swap chain, loads the
 production React bundle through CEF, routes JavaScript calls to a fake GTA API,
 and reports compositor statistics once per second.
 
-## Packaged build
+## Source-build staging
 
-After extracting the release ZIP:
+The harness is a release gate, not a player runtime. `build-package.ps1` stages
+it temporarily, runs it against the exact candidate runtime/UI files, and
+removes it before creating the ZIP. After a local Release build:
 
 ```powershell
-cd scripts/ReactorV
+cd src/ReactorV.Harness/bin/Release
 ./RageWebUI.Harness.exe --api d3d11
 ./RageWebUI.Harness.exe --api d3d12
 ```
@@ -43,7 +45,8 @@ app's initial API requests. It exits with code 0 on success.
 ## Development build
 
 `build-package.ps1` compiles and stages everything needed by the harness before
-running both smoke tests. To launch the already-built executable directly, make
+running both smoke tests, but never ships `RageWebUI.Harness.exe` in the public
+player ZIP. To launch the already-built executable directly, make
 sure `RageWebUI.Native.dll` and an `ui` directory containing `index.html` sit
 beside `src/ReactorV.Harness/bin/Release/RageWebUI.Harness.exe`.
 

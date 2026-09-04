@@ -7,8 +7,10 @@ unchanged through `window.rageWebUI`; new pages use `window.reactorV`.
 const runtime = await window.reactorV.runtime.handshake({ apiVersions: [2, 1] })
 if (!runtime.capabilities.includes('menu.discovery')) throw new Error('Menus are unavailable')
 
-await window.reactorV.overlay.setVisibility('visible')
-await window.reactorV.overlay.setInputMode('menu')
+await window.reactorV.overlay.setState({
+  visibility: 'visible',
+  inputMode: 'menu',
+})
 ```
 
 Every helper returns a `Promise`. Rejections are `GtaBridgeError` instances
@@ -32,8 +34,10 @@ same API.
 |---|---|---|
 | `runtime.handshake(request?)` | `runtime.handshake` | Negotiate the browser API and read runtime identity/capabilities. |
 | `runtime.describe()` | `runtime.describe` | Enumerate methods, events, capabilities, and limits. |
+| `overlay.setState(state)` | `overlay.setState` | Atomically set visibility and input ownership. Use this to open or close an interactive surface. |
 | `overlay.setVisibility(state)` | `overlay.setVisibility` | Set `visible`, `hidden`, or `toggle`. |
 | `overlay.setInputMode(mode)` | `overlay.setInputMode` | Select `game`, `menu`, `pointer`, or `exclusive` input. |
+| `overlay.presentationReady(id)` | `overlay.presentationReady` | Acknowledge that the exact presented menu has committed and measured its complete layout. |
 | `extensions.list()` | `extensions.list` | Read compact registered-extension summaries. |
 | `extensions.get(extensionId)` | `extensions.get` | Read one extension's capabilities, typed actions, events, and menu IDs. |
 | `extensions.invoke(request)` | `extensions.invoke` | Invoke one declared extension action. |
@@ -43,16 +47,43 @@ same API.
 | `events.subscribe(request, listener?)` | `events.subscribe` | Register a bounded host subscription and optional local listener. |
 | `events.unsubscribe(id)` | `events.unsubscribe` | Release a host subscription. |
 
+Opening an overlay must acquire its input mode in the same game-thread
+transaction. `overlay.setState` is the preferred path. For compatibility, the
+two older calls may still be used while hidden, but input mode must be selected
+before visibility:
+
+```ts
+await window.reactorV.overlay.setInputMode('menu')
+await window.reactorV.overlay.setVisibility('visible')
+```
+
+Reactor rejects a visible surface in `game` mode and rejects changing a visible
+surface back to `game`. Close it atomically with
+`setState({ visibility: 'hidden', inputMode: 'game' })`; this prevents the click
+or key that opened or closed Reactor from falling through to GTA.
+
 `runtime.lifecycle` reports host phases such as `browser-ready`, `story-ready`,
 and `shutting-down`. `input.action` reports normalized keyboard, mouse, controller,
 and game actions. Extension events are namespaced as
 `<extensionId>.<eventId>`.
+
+The built-in menu host calls `overlay.presentationReady` after React commits a
+complete presentation. Reactor accepts only the currently pending
+`presentationId`, keeps stale or replaced presentations hidden, and then runs
+an independent compositor probe before revealing the window. Custom pages
+that implement the `menu.presentation` lifecycle directly must follow the same
+handshake; ordinary extension actions never need to call it.
 
 ## Extensions and safe invocation
 
 `extensions.list()` returns `{ total, items }`, where each compact item carries
 identity, version, extension API version, and action/event/menu counts. Call
 `extensions.get(id)` for capabilities and full action/event/menu-ID detail.
+
+`startup.getStatus` includes `defaultMenuRequested` and an optional
+`defaultMenuDeadlineUtc`. UI copy may promise an automatic default menu only
+while that typed request is true; missing fields from an older host are
+treated as false.
 Each action declares its parameter types, risk (`read`, `gameplay`, or
 `persistent`), confirmation requirement, and whether extra parameters are
 accepted. This split keeps discovery bounded even with many large extensions.
@@ -171,7 +202,9 @@ const stop = bridge.on('game.state', (next) => console.log(next.player.position)
 
 The v1 helpers remain `overlay.ready`, `overlay.close`, `game.getState`,
 `ui.notify`, player heal/invincibility/wanted/teleport, vehicle repair/spawn,
-and world time/weather.
+and world time/weather. The current menu surface additionally uses the bounded
+`ui.playMenuCue` method for native navigate/select/back/error feedback; callers
+cannot choose arbitrary game sounds or sound sets.
 
 ## Security boundary
 

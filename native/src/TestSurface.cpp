@@ -20,6 +20,8 @@ std::atomic_bool testRunning{false};
 std::atomic_bool testStopRequested{false};
 HWND testWindow{};
 
+constexpr wchar_t TestWindowClassName[] = L"RageWebUI.DirectXHarness";
+
 LRESULT CALLBACK TestWindowProcedure(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     if (message == WM_CLOSE) {
         testStopRequested.store(true, std::memory_order_relaxed);
@@ -33,21 +35,89 @@ LRESULT CALLBACK TestWindowProcedure(HWND window, UINT message, WPARAM wParam, L
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
-HWND CreateTestWindow(const std::int32_t width, const std::int32_t height, const wchar_t* title) {
-    static constexpr wchar_t ClassName[] = L"RageWebUI.DirectXHarness";
-    WNDCLASSW windowClass{};
-    windowClass.lpfnWndProc = TestWindowProcedure;
-    windowClass.hInstance = GetModuleHandleW(nullptr);
-    windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-    windowClass.lpszClassName = ClassName;
-    RegisterClassW(&windowClass);
+class TestWindowClassRegistration final {
+public:
+    ~TestWindowClassRegistration() {
+        Reset();
+    }
 
+    TestWindowClassRegistration(const TestWindowClassRegistration&) = delete;
+    TestWindowClassRegistration& operator=(
+        const TestWindowClassRegistration&) = delete;
+
+    TestWindowClassRegistration() = default;
+
+    bool Register() noexcept {
+        Reset();
+        HMODULE module{};
+        if (GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&TestWindowProcedure),
+                &module) == FALSE || module == nullptr) {
+            return false;
+        }
+
+        instance_ = module;
+        WNDCLASSW windowClass{};
+        windowClass.lpfnWndProc = TestWindowProcedure;
+        windowClass.hInstance = instance_;
+        windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+        windowClass.hbrBackground = reinterpret_cast<HBRUSH>(
+            GetStockObject(BLACK_BRUSH));
+        windowClass.lpszClassName = TestWindowClassName;
+        if (RegisterClassW(&windowClass) != 0) {
+            active_ = true;
+            return true;
+        }
+        if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            instance_ = nullptr;
+            return false;
+        }
+
+        // A prior load may have left the same local class behind if a caller
+        // unloaded without completing RWUI_TestStop. Adopt it only when its
+        // module identity and procedure both resolve to this exact DLL load;
+        // never create a window through an arbitrary/stale callback.
+        WNDCLASSW existing{};
+        if (GetClassInfoW(instance_, TestWindowClassName, &existing) == FALSE ||
+            existing.hInstance != instance_ ||
+            existing.lpfnWndProc != TestWindowProcedure) {
+            instance_ = nullptr;
+            return false;
+        }
+        active_ = true;
+        return true;
+    }
+
+    HINSTANCE Instance() const noexcept {
+        return instance_;
+    }
+
+private:
+    void Reset() noexcept {
+        if (active_ && instance_ != nullptr) {
+            UnregisterClassW(TestWindowClassName, instance_);
+        }
+        active_ = false;
+        instance_ = nullptr;
+    }
+
+    HINSTANCE instance_{};
+    bool active_{};
+};
+
+HWND CreateTestWindow(
+    const HINSTANCE instance,
+    const std::int32_t width,
+    const std::int32_t height,
+    const wchar_t* title) {
+    if (instance == nullptr) return nullptr;
     RECT rectangle{0, 0, width, height};
     AdjustWindowRect(&rectangle, WS_OVERLAPPEDWINDOW, FALSE);
     return CreateWindowExW(
         0,
-        ClassName,
+        TestWindowClassName,
         title == nullptr ? L"RageWebUI DirectX Harness" : title,
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
@@ -56,7 +126,7 @@ HWND CreateTestWindow(const std::int32_t width, const std::int32_t height, const
         rectangle.bottom - rectangle.top,
         nullptr,
         nullptr,
-        windowClass.hInstance,
+        instance,
         nullptr);
 }
 
@@ -126,7 +196,14 @@ void RunTestSurface(
     const std::int32_t height,
     std::wstring title) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    testWindow = CreateTestWindow(width, height, title.c_str());
+    TestWindowClassRegistration windowClass;
+    if (!windowClass.Register()) {
+        testRunning.store(false, std::memory_order_relaxed);
+        CoUninitialize();
+        return;
+    }
+    testWindow = CreateTestWindow(
+        windowClass.Instance(), width, height, title.c_str());
     if (testWindow == nullptr) {
         testRunning.store(false, std::memory_order_relaxed);
         CoUninitialize();
@@ -138,7 +215,10 @@ void RunTestSurface(
     const bool created = api == RwuiRenderApi::Direct3D11
         ? CreateD3D11SwapChain(testWindow, width, height, &swapChain)
         : CreateD3D12SwapChain(testWindow, width, height, &swapChain, &queue);
-    if (!created || !g_inputQueue.Attach(testWindow)) {
+    if (!created ||
+        !g_compositor.Prepare(swapChain.Get(), queue.Get()) ||
+        !g_inputQueue.Attach(testWindow)) {
+        g_compositor.Reset();
         DestroyWindow(testWindow);
         testWindow = nullptr;
         testRunning.store(false, std::memory_order_relaxed);
@@ -211,13 +291,24 @@ RWUI_API std::int32_t RWUI_CALL RWUI_TestStart(
     const std::int32_t width,
     const std::int32_t height,
     const wchar_t* title) {
-    return rwui::StartTestSurface(api, width, height, title) ? 1 : 0;
+    try {
+        return rwui::StartTestSurface(api, width, height, title) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
 }
 
 RWUI_API void RWUI_CALL RWUI_TestStop() {
-    rwui::StopTestSurface();
+    try {
+        rwui::StopTestSurface();
+    } catch (...) {
+    }
 }
 
 RWUI_API std::int32_t RWUI_CALL RWUI_TestIsRunning() {
-    return rwui::IsTestSurfaceRunning() ? 1 : 0;
+    try {
+        return rwui::IsTestSurfaceRunning() ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
 }

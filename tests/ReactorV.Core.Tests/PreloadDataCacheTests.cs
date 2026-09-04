@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RageWebUI.Core;
@@ -41,6 +43,23 @@ public sealed class PreloadDataCacheTests : IDisposable
             (stage, _) => stages.Add(stage));
 
         Assert.True(result.Complete);
+        Assert.True(PreloadDataCache.IsReadyForHandoff(result.GtaProcessId, result));
+        using (var ready = PreloadHandoff.CreatePreloadDataReadyWaitHandle(result.GtaProcessId))
+        {
+            ready.Reset();
+            Assert.True(PreloadHandoff.TrySignalPreloadDataReady(result.GtaProcessId, result));
+            Assert.True(ready.WaitOne(0));
+        }
+        var mismatchedProcessId = result.GtaProcessId == int.MaxValue
+            ? result.GtaProcessId - 1
+            : result.GtaProcessId + 1;
+        using (var mismatched = PreloadHandoff.CreatePreloadDataReadyWaitHandle(mismatchedProcessId))
+        {
+            mismatched.Reset();
+            Assert.False(PreloadDataCache.IsReadyForHandoff(mismatchedProcessId, result));
+            Assert.False(PreloadHandoff.TrySignalPreloadDataReady(mismatchedProcessId, result));
+            Assert.False(mismatched.WaitOne(0));
+        }
         Assert.Single(result.SnapshotPaths);
         Assert.Equal(1, result.EntryCount);
         var snapshotText = File.ReadAllText(result.SnapshotPaths[0]);
@@ -67,6 +86,85 @@ public sealed class PreloadDataCacheTests : IDisposable
     }
 
     [Fact]
+    public void Snapshot_hash_length_and_timestamp_describe_exact_utf8_source()
+    {
+        var fixture = CreateFixture();
+        const string content = "café 東京\n";
+        const string portablePath = "scripts/ALLIN1/labels.txt";
+        WriteSource(fixture.GtaRoot, portablePath, content);
+        var sourcePath = Path.Combine(
+            fixture.GtaRoot,
+            portablePath.Replace('/', Path.DirectorySeparatorChar));
+        var expectedTicks = new FileInfo(sourcePath).LastWriteTimeUtc.Ticks;
+        WriteManifest(fixture.GtaRoot, "utf8", new JArray
+        {
+            Entry("labels", portablePath, "text", true, 1024),
+        });
+
+        var result = PreloadDataCache.Build(
+            fixture.GtaRoot,
+            Process.GetCurrentProcess().Id,
+            fixture.CacheRoot);
+
+        Assert.True(PreloadDataCache.IsReadyForHandoff(result.GtaProcessId, result));
+        var snapshot = JObject.Parse(File.ReadAllText(Assert.Single(result.SnapshotPaths)));
+        var entry = snapshot["entries"]![0]!;
+        Assert.Equal(content, entry.Value<string>("content"));
+        Assert.Equal(Encoding.UTF8.GetByteCount(content), entry.Value<long>("length"));
+        Assert.Equal(Sha256(content), entry.Value<string>("sha256"));
+        Assert.Equal(expectedTicks, entry.Value<long>("last_write_utc_ticks"));
+    }
+
+    [Fact]
+    public async Task Async_build_runs_bounded_file_work_off_the_calling_thread()
+    {
+        var fixture = CreateFixture();
+        WriteSource(fixture.GtaRoot, "scripts/value.txt", "ready");
+        WriteManifest(fixture.GtaRoot, "async", new JArray
+        {
+            Entry("value", "scripts/value.txt", "text", true, 16),
+        });
+        var callingThread = Thread.CurrentThread.ManagedThreadId;
+        var workerThread = 0;
+        using var started = new ManualResetEventSlim();
+
+        var build = PreloadDataCache.BuildAsync(
+            fixture.GtaRoot,
+            Process.GetCurrentProcess().Id,
+            fixture.CacheRoot,
+            (stage, _) =>
+            {
+                if (stage == "preload_data_begin")
+                {
+                    workerThread = Thread.CurrentThread.ManagedThreadId;
+                    started.Set();
+                }
+            });
+
+        Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+        Assert.NotEqual(callingThread, workerThread);
+        Assert.True((await build).Complete);
+    }
+
+    [Fact]
+    public async Task Async_build_honors_cancellation_before_touching_process_cache()
+    {
+        var fixture = CreateFixture();
+        var processId = int.MaxValue - 101;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            PreloadDataCache.BuildAsync(
+                fixture.GtaRoot,
+                processId,
+                fixture.CacheRoot,
+                cancellationToken: cancellation.Token));
+
+        Assert.False(Directory.Exists(Path.Combine(fixture.CacheRoot, processId.ToString())));
+    }
+
+    [Fact]
     public void Traversal_absolute_paths_and_reparse_escapes_fail_closed()
     {
         var fixture = CreateFixture();
@@ -82,6 +180,13 @@ public sealed class PreloadDataCacheTests : IDisposable
             fixture.CacheRoot);
 
         Assert.False(result.Complete);
+        Assert.False(PreloadDataCache.IsReadyForHandoff(result.GtaProcessId, result));
+        using (var ready = PreloadHandoff.CreatePreloadDataReadyWaitHandle(result.GtaProcessId))
+        {
+            ready.Reset();
+            Assert.False(PreloadHandoff.TrySignalPreloadDataReady(result.GtaProcessId, result));
+            Assert.False(ready.WaitOne(0));
+        }
         var snapshot = JObject.Parse(File.ReadAllText(Assert.Single(result.SnapshotPaths)));
         Assert.Empty(snapshot["entries"]!);
         Assert.Equal(2, snapshot["errors"]!.Count());
@@ -111,6 +216,31 @@ public sealed class PreloadDataCacheTests : IDisposable
         var error = Assert.Single(snapshot["errors"]!);
         Assert.Equal("required_entry_missing", error!.Value<string>("code"));
         Assert.Equal("required", error.Value<string>("entry_id"));
+    }
+
+    [Fact]
+    public void Missing_manifest_directory_is_a_distinct_successful_empty_preload()
+    {
+        var fixture = CreateFixture();
+        var stages = new System.Collections.Generic.List<string>();
+
+        var result = PreloadDataCache.Build(
+            fixture.GtaRoot,
+            Process.GetCurrentProcess().Id,
+            fixture.CacheRoot,
+            (stage, _) => stages.Add(stage));
+
+        Assert.True(result.Complete);
+        Assert.Empty(result.SnapshotPaths);
+        Assert.False(PreloadDataCache.IsReadyForHandoff(result.GtaProcessId, result));
+        using (var ready = PreloadHandoff.CreatePreloadDataReadyWaitHandle(result.GtaProcessId))
+        {
+            ready.Reset();
+            Assert.False(PreloadHandoff.TrySignalPreloadDataReady(result.GtaProcessId, result));
+            Assert.False(ready.WaitOne(0));
+        }
+        Assert.Contains("preload_manifest_directory_absent", stages);
+        Assert.Contains("preload_data_complete", stages);
     }
 
     [Fact]
@@ -198,6 +328,36 @@ public sealed class PreloadDataCacheTests : IDisposable
         Assert.Empty(snapshot["entries"]!);
         Assert.Contains(snapshot["errors"]!, error =>
             error!.Value<string>("code") == "snapshot_limit_exceeded");
+    }
+
+    [Fact]
+    public void Aggregate_content_over_sixteen_mib_is_rejected_before_embedding()
+    {
+        var fixture = CreateFixture();
+        var entries = new JArray();
+        var fullContent = new string('a', (int)PreloadDataCache.MaximumEntryBytes);
+        for (var index = 0; index < 4; index++)
+        {
+            var portablePath = "scripts/full-" + index + ".txt";
+            WriteSource(fixture.GtaRoot, portablePath, fullContent);
+            entries.Add(Entry("full-" + index, portablePath, "text", true, PreloadDataCache.MaximumEntryBytes));
+        }
+        WriteSource(fixture.GtaRoot, "scripts/overflow.txt", "x");
+        entries.Add(Entry("overflow", "scripts/overflow.txt", "text", true, 1));
+        WriteManifest(fixture.GtaRoot, "aggregate", entries);
+
+        var result = PreloadDataCache.Build(
+            fixture.GtaRoot,
+            Process.GetCurrentProcess().Id,
+            fixture.CacheRoot);
+
+        Assert.False(result.Complete);
+        Assert.Equal(PreloadDataCache.MaximumAggregateBytes, result.AggregateBytes);
+        var snapshot = JObject.Parse(File.ReadAllText(Assert.Single(result.SnapshotPaths)));
+        Assert.Equal(4, snapshot["entries"]!.Count());
+        Assert.Contains(snapshot["errors"]!, error =>
+            error!.Value<string>("code") == "aggregate_limit_exceeded" &&
+            error.Value<string>("entry_id") == "overflow");
     }
 
     [Fact]

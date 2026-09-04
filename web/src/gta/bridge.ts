@@ -47,6 +47,20 @@ export interface InvokeOptions {
   signal?: AbortSignal
 }
 
+export interface LiveAcceptanceMenuState {
+  presentationId: string
+  providerId: string
+  rootMenuId: string
+  menuId: string
+  routeId: string
+  sectionId: string
+  payloadStatus: 'ready' | 'loading' | 'error' | 'empty'
+  itemCount: number
+  contentItemCount: number
+  actionableItemCount: number
+  statusItemCount: number
+}
+
 const DEFAULT_TIMEOUT_MS = 5000
 const MAX_TIMEOUT_MS = 300_000
 const MAX_DEADLINE_MS = 120_000
@@ -54,6 +68,14 @@ const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const methodOrEventPattern = /^[a-z][A-Za-z0-9]*(\.[a-z][A-Za-z0-9]*)+$/
 const requestIdPattern = /^[A-Za-z0-9_-]{1,64}$/
 const errorCodePattern = /^[a-z][a-z0-9._-]{0,63}$/
+const menuIdentityPattern = /^[a-z][a-z0-9._-]{0,63}$/
+const replayableEventNames = new Set([
+  'host.browserRole',
+  'host.provider',
+  'host.surface',
+  'menu.presentation',
+  'startup.status',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -127,12 +149,17 @@ export class GtaBridge {
   private destroyed = false
   private readonly pending = new Map<string, PendingRequest>()
   private readonly listeners = new Map<string, Set<EventListener>>()
+  private readonly latestEvents = new Map<string, unknown>()
   private readonly onMessageBound = (event: { data: unknown }) => this.onMessage(event.data)
 
   constructor(
     private readonly transport: WebViewTransport,
     public readonly isNative: boolean,
+    private readonly requestIdPrefix = 'web',
   ) {
+    if (!/^[A-Za-z0-9_-]{1,12}$/.test(requestIdPrefix)) {
+      throw new GtaBridgeError('invalid_request_prefix', 'The bridge request prefix is invalid.')
+    }
     transport.addEventListener('message', this.onMessageBound)
   }
 
@@ -162,7 +189,7 @@ export class GtaBridge {
       return Promise.reject(new GtaBridgeError('aborted', `GTA request '${method}' was cancelled.`))
     }
 
-    const id = `web-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`
+    const id = `${this.requestIdPrefix}-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`
     return new Promise<T>((resolve, reject) => {
       const timeout = globalThis.setTimeout(() => {
         const pending = this.pending.get(id)
@@ -210,7 +237,7 @@ export class GtaBridge {
     })
   }
 
-  on<T>(eventName: string, listener: EventListener<T>): () => void {
+  on<T>(eventName: string, listener: EventListener<T>, replayLatest = false): () => void {
     if (this.destroyed) throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
     if (!methodOrEventPattern.test(eventName) || eventName.length > 96) {
       throw new GtaBridgeError('invalid_event', 'GTA event names must be bounded dot-separated identifiers.')
@@ -218,7 +245,133 @@ export class GtaBridge {
     const listeners = this.listeners.get(eventName) ?? new Set<EventListener>()
     listeners.add(listener as EventListener)
     this.listeners.set(eventName, listeners)
+    if (replayLatest && this.latestEvents.has(eventName)) {
+      try {
+        listener(this.latestEvents.get(eventName) as T)
+      } catch (error) {
+        globalThis.console?.error?.(`ReactorV listener for '${eventName}' failed.`, error)
+      }
+    }
     return () => listeners.delete(listener as EventListener)
+  }
+
+  /**
+   * Close the persistent bootstrap surface without requiring the late GTA
+   * provider. The host command is intentionally fixed and carries no user
+   * data; normal gameplay operations continue to use typed request envelopes.
+   */
+  closeHostSurface(): void {
+    if (this.destroyed) {
+      throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
+    }
+    try {
+      this.transport.postMessage({
+        kind: 'host',
+        command: 'close',
+        protocolVersion: 2,
+        minimumProtocolVersion: 1,
+      })
+    } catch (error) {
+      throw new GtaBridgeError(
+        'transport_error',
+        error instanceof Error ? error.message : 'GTA transport failed.',
+      )
+    }
+  }
+
+  /** Confirm that React committed the exact bootstrap surface generation. */
+  markHostSurfaceReady(mode: 'about' | 'verifying' | 'setup-status' | 'initializing', generation: number): void {
+    if (this.destroyed) {
+      throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
+    }
+    if (!Number.isSafeInteger(generation) || generation <= 0) {
+      throw new GtaBridgeError('invalid_generation', 'Host surface generation must be a positive integer.')
+    }
+    try {
+      this.transport.postMessage({
+        kind: 'host',
+        command: 'surface-ready',
+        mode,
+        generation,
+        protocolVersion: 2,
+        minimumProtocolVersion: 1,
+      })
+    } catch (error) {
+      throw new GtaBridgeError(
+        'transport_error',
+        error instanceof Error ? error.message : 'GTA transport failed.',
+      )
+    }
+  }
+
+  /**
+   * Publish the accelerated browser's exact provider pixels after React has
+   * received native acceptance, committed that presentation, and crossed its
+   * strict two-frame paint boundary. This is a one-way host signal: it never
+   * competes with the authoritative presentationReady response IDs.
+   */
+  markExternalProviderSurfacePainted(
+    presentationId: string,
+    providerSessionGeneration: number,
+  ): void {
+    if (this.destroyed) {
+      throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
+    }
+    if (typeof presentationId !== 'string' || presentationId.trim().length === 0 ||
+      presentationId.length > 128) {
+      throw new GtaBridgeError('invalid_presentation', 'The provider presentation ID is invalid.')
+    }
+    if (!Number.isSafeInteger(providerSessionGeneration) || providerSessionGeneration <= 0) {
+      throw new GtaBridgeError('invalid_generation', 'Provider session generation must be a positive integer.')
+    }
+    try {
+      this.transport.postMessage({
+        kind: 'host',
+        command: 'provider-surface-painted',
+        presentationId,
+        providerSessionGeneration,
+        protocolVersion: 2,
+        minimumProtocolVersion: 1,
+      })
+    } catch (error) {
+      throw new GtaBridgeError(
+        'transport_error',
+        error instanceof Error ? error.message : 'GTA transport failed.',
+      )
+    }
+  }
+
+  /**
+   * Publish a read-only semantic observation for the opt-in live acceptance
+   * harness. The native host binds it to the active presentation before it is
+   * allowed into trace evidence; it is never dispatched as a gameplay API.
+   */
+  reportLiveAcceptanceMenuState(state: LiveAcceptanceMenuState): void {
+    if (this.destroyed) {
+      throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
+    }
+    const identities = [state.providerId, state.rootMenuId, state.menuId, state.routeId, state.sectionId]
+    const counts = [state.itemCount, state.contentItemCount, state.actionableItemCount, state.statusItemCount]
+    if (!idempotencyKeyPattern.test(state.presentationId) ||
+      !identities.every((value) => menuIdentityPattern.test(value)) ||
+      !counts.every((value) => Number.isSafeInteger(value) && value >= 0 && value <= 10_000) ||
+      state.contentItemCount > state.itemCount ||
+      state.actionableItemCount + state.statusItemCount > state.contentItemCount) {
+      throw new GtaBridgeError('invalid_acceptance_state', 'The live acceptance menu state is invalid.')
+    }
+    try {
+      this.transport.postMessage({
+        kind: 'acceptance',
+        command: 'menu-state',
+        schemaVersion: 1,
+        ...state,
+      })
+    } catch (error) {
+      throw new GtaBridgeError(
+        'transport_error',
+        error instanceof Error ? error.message : 'GTA transport failed.',
+      )
+    }
   }
 
   destroy(): void {
@@ -233,6 +386,7 @@ export class GtaBridge {
     })
     this.pending.clear()
     this.listeners.clear()
+    this.latestEvents.clear()
   }
 
   private onMessage(data: unknown): void {
@@ -251,6 +405,14 @@ export class GtaBridge {
     }
 
     if (isBridgeEvent(data)) {
+      if (replayableEventNames.has(data.event)) {
+        this.latestEvents.set(data.event, data.payload)
+      } else if (data.event === 'menu.dismissed' && isRecord(data.payload)) {
+        const active = this.latestEvents.get('menu.presentation')
+        if (isRecord(active) && active.presentationId === data.payload.presentationId) {
+          this.latestEvents.delete('menu.presentation')
+        }
+      }
       this.listeners.get(data.event)?.forEach((listener) => {
         try {
           listener(data.payload)
@@ -279,7 +441,11 @@ export class GtaBridge {
 const webViewTransport = typeof window === 'undefined' ? undefined : window.chrome?.webview
 const cefTransport = typeof window !== 'undefined' && window.CefSharp?.PostMessage ? new CefTransport() : undefined
 const nativeTransport = webViewTransport ?? cefTransport
-export const bridge = new GtaBridge(nativeTransport ?? new DemoTransport(), Boolean(nativeTransport))
+export const bridge = new GtaBridge(
+  nativeTransport ?? new DemoTransport(),
+  Boolean(nativeTransport),
+  cefTransport ? 'gpu' : 'web',
+)
 
 export const gta = {
   ready: () => bridge.invoke<RuntimeStatus>('overlay.ready'),

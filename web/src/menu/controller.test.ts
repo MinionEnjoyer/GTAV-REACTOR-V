@@ -52,6 +52,10 @@ describe('menu adapter and controller', () => {
     expect(controller.focusedItem?.id).toBe('owned')
     await controller.activate()
     expect(controller.currentRoute.id).toBe('tabs/sections/owned')
+    expect(controller.moveTab(1)).toBe(true)
+    expect(controller.currentRoute.id).toBe('tabs/sections/browse')
+    expect(controller.moveTab(-1)).toBe(true)
+    expect(controller.currentRoute.id).toBe('tabs/sections/owned')
   })
 
   it('skips passive rows, adjusts values, and emits host-ready node invocations', async () => {
@@ -82,6 +86,71 @@ describe('menu adapter and controller', () => {
     expect(controller.focusedItem?.id).toBe('settings')
   })
 
+  it('restores a valid route and focus after an authoritative descriptor refresh', () => {
+    const first = new MenuController(adaptMenusToRoutes(wireMenus, 'main'))
+    first.push('main/catalog')
+    first.focus('buy')
+
+    const refreshed = new MenuController(adaptMenusToRoutes(structuredClone(wireMenus), 'main'))
+    refreshed.restore(first.snapshot)
+
+    expect(refreshed.snapshot.stack).toEqual(['main', 'main/catalog'])
+    expect(refreshed.currentRoute.id).toBe('main/catalog')
+    expect(refreshed.focusedItem?.id).toBe('buy')
+  })
+
+  it('replaces descriptors in place while retaining route focus and invocation wiring', async () => {
+    const invoke = vi.fn()
+    const controller = new MenuController(adaptMenusToRoutes(wireMenus, 'main'), { invoke })
+    controller.push('main/catalog')
+    controller.focus('buy')
+    const replacement = structuredClone(wireMenus)
+    replacement[0].nodes = replacement[0].nodes.map((node) =>
+      node.id === 'catalog' ? { ...node, label: 'Updated catalog' } : node)
+
+    controller.replaceMenu(adaptMenusToRoutes(replacement, 'main'))
+    expect(controller.snapshot.stack).toEqual(['main', 'main/catalog'])
+    expect(controller.focusedItem?.id).toBe('buy')
+    await controller.activate()
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'buy' }))
+  })
+
+  it('falls back to home when a refreshed descriptor removes the active route', () => {
+    const first = new MenuController(adaptMenusToRoutes(wireMenus, 'main'))
+    first.push('main/catalog')
+    const replacement = structuredClone(wireMenus)
+    replacement[0].nodes = replacement[0].nodes.filter((node) => node.id !== 'catalog')
+
+    const refreshed = new MenuController(adaptMenusToRoutes(replacement, 'main'))
+    refreshed.restore(first.snapshot)
+
+    expect(refreshed.snapshot.stack).toEqual(['main'])
+    expect(refreshed.currentRoute.id).toBe('main')
+  })
+
+  it('drops surviving descendants after a refreshed descriptor removes an intermediate route', () => {
+    const base: RoutedMenuDescriptor = {
+      extensionId: 'fixture', id: 'nested', title: 'Nested', homeRouteId: 'home',
+      routes: [
+        { id: 'home', title: 'Home', items: [] },
+        { id: 'parent', title: 'Parent', parentId: 'home', items: [] },
+        { id: 'child', title: 'Child', parentId: 'parent', items: [] },
+      ],
+    }
+    const first = new MenuController(base)
+    first.push('parent')
+    first.push('child')
+
+    const refreshed = new MenuController({
+      ...base,
+      routes: base.routes?.filter((route) => route.id !== 'parent'),
+    })
+    refreshed.restore(first.snapshot)
+
+    expect(refreshed.snapshot.stack).toEqual(['home'])
+    expect(refreshed.currentRoute.id).toBe('home')
+  })
+
   it('passes typed action parameters without exposing the action binding to the caller', async () => {
     const invoke = vi.fn()
     const controller = new MenuController(adaptMenusToRoutes(wireMenus, 'main'), { invoke })
@@ -91,6 +160,24 @@ describe('menu adapter and controller', () => {
     expect(invoke).toHaveBeenCalledWith({
       extensionId: 'fixture', menuId: 'main', nodeId: 'buy', interaction: 'activate',
       parameters: { listingId: 'bus-42' }, confirmed: true,
+    })
+  })
+
+  it('does not echo host-bound node parameters into browser invocations', async () => {
+    const invoke = vi.fn()
+    const boundMenu: MenuDescriptor = {
+      extensionId: 'fixture', id: 'bound', label: 'Bound', description: '', icon: '', order: 1,
+      nodes: [{
+        id: 'purchase', kind: 'action', label: 'Purchase', description: '', enabled: true, visible: true,
+        actionId: 'catalog.purchase', boundParameters: { listingId: 'host-owned-42' },
+      }],
+    }
+    const controller = new MenuController(adaptMenusToRoutes([boundMenu], 'bound'), { invoke })
+
+    await controller.activate()
+
+    expect(invoke).toHaveBeenCalledWith({
+      extensionId: 'fixture', menuId: 'bound', nodeId: 'purchase', interaction: 'activate',
     })
   })
 
@@ -119,6 +206,19 @@ describe('menu adapter and controller', () => {
     const controller = new MenuController(menu)
     await controller.adjust(1)
     expect(controller.focusedItem).toMatchObject({ value: 'c' })
+  })
+
+  it('rolls back optimistic values when the host rejects or cancels an invocation', async () => {
+    const controller = new MenuController(adaptMenusToRoutes(wireMenus, 'main'), {
+      invoke: async () => { throw new Error('cancelled') },
+    })
+
+    await expect(controller.activate()).rejects.toThrow('cancelled')
+    expect(controller.focusedItem).toMatchObject({ id: 'enabled', value: false })
+
+    controller.push('settings')
+    await expect(controller.adjust(-1)).rejects.toThrow('cancelled')
+    expect(controller.focusedItem).toMatchObject({ id: 'gain', value: 1 })
   })
 
   it('rejects a routed menu without its declared home route', () => {

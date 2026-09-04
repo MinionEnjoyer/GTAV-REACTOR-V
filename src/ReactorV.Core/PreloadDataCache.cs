@@ -7,6 +7,8 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -38,6 +40,39 @@ namespace RageWebUI.Core
             ValidateProcessId(gtaProcessId);
             return @"Local\ReactorV.PreloadDataReady." +
                 gtaProcessId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public static bool IsReadyForHandoff(
+            int gtaProcessId,
+            PreloadDataBuildResult? result)
+        {
+            ValidateProcessId(gtaProcessId);
+            return result != null &&
+                result.GtaProcessId == gtaProcessId &&
+                result.Complete &&
+                result.SnapshotPaths.Count > 0;
+        }
+
+        public static Task<PreloadDataBuildResult> BuildAsync(
+            string gtaRoot,
+            int gtaProcessId,
+            string? cacheRootOverride = null,
+            Action<string, string?>? trace = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.Run(
+                () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var result = Build(
+                        gtaRoot,
+                        gtaProcessId,
+                        cacheRootOverride,
+                        trace);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return result;
+                },
+                cancellationToken);
         }
 
         public static string ResolveGtaRootFromPreloaderDirectory(
@@ -148,6 +183,16 @@ namespace RageWebUI.Core
             {
                 var manifestName = Path.GetFileName(manifestPath);
                 trace?.Invoke("preload_manifest_discovered", $"manifest={manifestName}");
+                if (HasReparsePoint(manifestPath))
+                {
+                    result.AddError(
+                        "manifest_reparse_point_rejected",
+                        $"Manifest '{manifestName}' may not be a reparse point.");
+                    trace?.Invoke(
+                        "preload_manifest_rejected",
+                        $"manifest={manifestName} reason=reparse_point");
+                    continue;
+                }
                 JObject document;
                 try
                 {
@@ -183,7 +228,7 @@ namespace RageWebUI.Core
                     continue;
                 }
 
-                var manifestId = document.Value<string>("id");
+                var manifestId = StringValue(document, "id");
                 if (!IsStrictIdentifier(manifestId))
                 {
                     result.AddError(
@@ -210,7 +255,11 @@ namespace RageWebUI.Core
                 var snapshotEntries = (JArray)snapshot["entries"]!;
                 var manifestComplete = true;
 
-                if (document.Value<int?>("schema_version") != SchemaVersion)
+                var schemaToken = document["schema_version"];
+                if (schemaToken == null ||
+                    schemaToken.Type != JTokenType.Integer ||
+                    !TryGetPositiveInt64(schemaToken, out var schemaVersion) ||
+                    schemaVersion != SchemaVersion)
                 {
                     AddSnapshotError(
                         snapshotErrors,
@@ -245,10 +294,13 @@ namespace RageWebUI.Core
                         continue;
                     }
 
-                    var entryId = entry.Value<string>("id");
-                    var portablePath = entry.Value<string>("path");
-                    var kind = entry.Value<string>("kind");
-                    var required = entry.Value<bool?>("required");
+                    var entryId = StringValue(entry, "id");
+                    var portablePath = StringValue(entry, "path");
+                    var kind = StringValue(entry, "kind");
+                    var requiredToken = entry["required"];
+                    bool? required = requiredToken?.Type == JTokenType.Boolean
+                        ? requiredToken.Value<bool>()
+                        : (bool?)null;
                     var maxBytesToken = entry["max_bytes"];
                     if (!IsStrictIdentifier(entryId) || !entryIds.Add(entryId!))
                     {
@@ -719,6 +771,12 @@ namespace RageWebUI.Core
 
         private static bool IsStrictIdentifier(string? value) =>
             !string.IsNullOrWhiteSpace(value) && IdentifierPattern.IsMatch(value!);
+
+        private static string? StringValue(JObject value, string propertyName)
+        {
+            var token = value[propertyName];
+            return token?.Type == JTokenType.String ? token.Value<string>() : null;
+        }
 
         private static bool TryGetPositiveInt64(JToken token, out long value)
         {

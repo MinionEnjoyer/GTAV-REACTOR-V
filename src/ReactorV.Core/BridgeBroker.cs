@@ -6,7 +6,7 @@ using RageWebUI.Core.Protocol;
 
 namespace RageWebUI.Core
 {
-    public sealed class BridgeBroker
+    public sealed class BridgeBroker : IBridgeMessageSink
     {
         public const int MaximumPendingRequests = 256;
 

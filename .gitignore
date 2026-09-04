@@ -1,6 +1,10 @@
 artifacts/
+.work/
 native/build/
 native/build.pre-reactorv-*/
+native/build-d3d12-debug/
+native/build-msvc-scriptprobe/
+native/build-d3d12-control/out/
 package/
 src/**/bin/
 src/**/obj/
@@ -12,5 +16,6 @@ web/dist/
 web/node_modules/
 web/node_modules.pre-reactorv-*/
 web/.vite/
+node_modules/
 *.user
 *.suo

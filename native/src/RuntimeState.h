@@ -13,6 +13,7 @@ extern DirectXCompositor g_compositor;
 extern InputQueue g_inputQueue;
 extern std::atomic_bool g_visible;
 
+bool ArmEnhancedHooks();
 bool InstallHooks(HWND targetWindow);
 void RemoveHooks();
 } // namespace rwui

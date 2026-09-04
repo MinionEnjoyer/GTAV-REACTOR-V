@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RageWebUI.Core.Protocol;
@@ -14,6 +15,35 @@ namespace ReactorV.Integration
         void UpdateMenu(ReactorMenuDescriptor menu);
         bool RemoveMenu(string menuId);
         bool TryPublishEvent(string eventId, JToken? payload);
+    }
+
+    /// <summary>
+    /// Optional menu-presentation capability. Extensions should feature-detect it
+    /// by casting their v1 handle rather than assuming a particular host build.
+    /// </summary>
+    public interface IReactorMenuPresentationHandle
+    {
+        bool TryPresentMenu(string menuId, JObject? context = null);
+        /// <summary>
+        /// Returns true from the moment this menu has an accepted presentation
+        /// generation until that pending, dispatching, or active generation is
+        /// acknowledged hidden by the host. A requested dismissal remains
+        /// presented until that acknowledgement, making this state safe for
+        /// hotkey transition serialization.
+        /// </summary>
+        bool IsMenuPresented(string menuId);
+        bool TryDismissMenu(string menuId);
+    }
+
+    /// <summary>
+    /// Optional presentation-readiness capability. Extensions should feature-detect
+    /// it by casting their v1 handle. Unlike <see cref="IReactorMenuPresentationHandle.IsMenuPresented"/>,
+    /// this reports true only after the exact active presentation has completed its
+    /// browser paint/ready acknowledgement.
+    /// </summary>
+    public interface IReactorMenuPresentationStateHandle
+    {
+        bool IsMenuPresentationReady(string menuId);
     }
 
     public sealed class ReactorExtensionBuilder
@@ -122,6 +152,17 @@ namespace ReactorV.Integration
             ReactorMenuNode node,
             ReactorActionDescriptor action)
         {
+            var boundParameters = node.BoundParametersSnapshot();
+            try
+            {
+                action.ValidateBoundParameters(boundParameters);
+            }
+            catch (ReactorValidationException error)
+            {
+                throw new InvalidOperationException(
+                    $"Menu '{menuId}' node '{node.Id}' has invalid bound parameters: {error.Message}");
+            }
+
             ReactorValueType? expected = node is ReactorToggleNode ? ReactorValueType.Boolean :
                 node is ReactorChoiceNode ? ReactorValueType.String :
                 node is ReactorRangeNode ? ReactorValueType.Number :
@@ -129,6 +170,11 @@ namespace ReactorV.Integration
                 node is ReactorKeybindNode ? ReactorValueType.String :
                 node is ReactorPaginationNode ? ReactorValueType.Integer : null;
             if (!expected.HasValue) return;
+
+            if (boundParameters.Properties().Any(property =>
+                string.Equals(property.Name, "value", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(
+                    $"Menu '{menuId}' node '{node.Id}' cannot bind the browser-owned 'value' parameter.");
 
             var valueParameter = action.Parameters.FirstOrDefault(parameter =>
                 string.Equals(parameter.Name, "value", StringComparison.Ordinal));
@@ -187,6 +233,16 @@ namespace ReactorV.Integration
 
         internal static JArray DescribeExtensions() => ReactorRegistry.Instance.DescribeExtensions();
 
+        internal static bool HasExtensionCapability(string capability) =>
+            ReactorRegistry.Instance.HasExtensionCapability(capability);
+
+        internal static bool ExtensionHasCapability(
+            string extensionId,
+            string capability) =>
+            ReactorRegistry.Instance.ExtensionHasCapability(
+                extensionId,
+                capability);
+
         internal static JObject DescribeMenuSummaries(string? extensionId = null) =>
             ReactorRegistry.Instance.DescribeMenuSummaries(extensionId);
 
@@ -227,10 +283,53 @@ namespace ReactorV.Integration
 
         internal static JArray DrainEvents() => ReactorRegistry.Instance.DrainEvents();
 
+        internal static JArray DrainMenuPresentations() =>
+            ReactorRegistry.Instance.DrainMenuPresentations();
+
+        internal static void SetMenuPresentationHostAvailable(bool available) =>
+            ReactorRegistry.Instance.SetMenuPresentationHostAvailable(available);
+
+        internal static bool MarkMenuPresentationActive(
+            string extensionId,
+            string menuId,
+            string presentationId,
+            out JObject? superseded) =>
+            ReactorRegistry.Instance.MarkMenuPresentationActive(
+                extensionId,
+                menuId,
+                presentationId,
+                out superseded);
+
+        internal static bool MarkMenuPresentationReady(string presentationId) =>
+            ReactorRegistry.Instance.MarkMenuPresentationReady(presentationId);
+
+        internal static bool CanMarkMenuPresentationReady(string presentationId) =>
+            ReactorRegistry.Instance.CanMarkMenuPresentationReady(presentationId);
+
+        internal static void ClearActiveMenuPresentation() =>
+            ReactorRegistry.Instance.ClearActiveMenuPresentation();
+
+        internal static JObject? TakeActiveMenuPresentation() =>
+            ReactorRegistry.Instance.TakeActiveMenuPresentation();
+
+        internal static JObject? AcknowledgeMenuPresentationHidden(
+            string presentationId) =>
+            ReactorRegistry.Instance.AcknowledgeMenuPresentationHidden(
+                presentationId);
+
+        internal static JArray DrainMenuDismissals() =>
+            ReactorRegistry.Instance.DrainMenuDismissals();
+
         internal static void NotifyLifecycle(ReactorLifecycleStage stage, JToken? payload = null) =>
             ReactorRegistry.Instance.NotifyLifecycle(stage, payload);
 
-        internal static void Reset() => ReactorRegistry.Instance.Reset();
+        internal static void Reset(JToken? unloadingPayload = null) =>
+            ReactorRegistry.Instance.Reset(unloadingPayload);
+
+        internal static void BeginShutdown(JToken? unloadingPayload = null) =>
+            ReactorRegistry.Instance.Reset(
+                unloadingPayload,
+                asynchronousUnloading: true);
     }
 
     internal sealed class ReactorActionRegistration
@@ -313,6 +412,61 @@ namespace ReactorV.Integration
         };
     }
 
+    internal sealed class ReactorMenuPresentationRecord
+    {
+        public ReactorMenuPresentationRecord(
+            string extensionId,
+            string menuId,
+            JObject context,
+            string? presentationId = null)
+        {
+            ExtensionId = extensionId;
+            MenuId = menuId;
+            Context = (JObject)context.DeepClone();
+            PresentationId = presentationId ?? Guid.NewGuid().ToString("N");
+        }
+
+        public string ExtensionId { get; }
+        public string MenuId { get; }
+        public string PresentationId { get; }
+        public JObject Context { get; }
+        public bool IsReady { get; set; }
+        public bool IsDismissalRequested { get; set; }
+
+        public JObject ToJson() => new JObject
+        {
+            ["extensionId"] = ExtensionId,
+            ["menuId"] = MenuId,
+            ["presentationId"] = PresentationId,
+            ["context"] = Context.DeepClone(),
+            ["inputMode"] = "interactive-menu",
+        };
+    }
+
+    internal sealed class ReactorMenuDismissalRecord
+    {
+        public ReactorMenuDismissalRecord(
+            string extensionId,
+            string menuId,
+            string presentationId)
+        {
+            ExtensionId = extensionId;
+            MenuId = menuId;
+            PresentationId = presentationId;
+        }
+
+        public string ExtensionId { get; }
+        public string MenuId { get; }
+        public string PresentationId { get; }
+
+        public JObject ToJson() => new JObject
+        {
+            ["extensionId"] = ExtensionId,
+            ["menuId"] = MenuId,
+            ["presentationId"] = PresentationId,
+        };
+    }
+
     internal sealed class ReactorRegistry
     {
         internal const int MaximumExtensions = 128;
@@ -320,6 +474,8 @@ namespace ReactorV.Integration
         internal const int MaximumEventsPerExtension = 128;
         internal const int MaximumMenusPerExtension = 64;
         internal const int MaximumPendingEvents = 256;
+        internal const int MaximumPendingMenuPresentations = 64;
+        internal const int MaximumPendingMenuDismissals = 64;
         internal const int MaximumIdempotencyEntries = 512;
 
         internal static ReactorRegistry Instance { get; } = new ReactorRegistry();
@@ -328,10 +484,24 @@ namespace ReactorV.Integration
         private readonly Dictionary<string, ReactorExtensionState> _extensions =
             new Dictionary<string, ReactorExtensionState>(StringComparer.OrdinalIgnoreCase);
         private readonly Queue<ReactorEventRecord> _events = new Queue<ReactorEventRecord>();
+        private readonly Queue<ReactorMenuPresentationRecord> _menuPresentations =
+            new Queue<ReactorMenuPresentationRecord>();
+        // Once drained, a presentation is no longer in the queue but has not
+        // yet crossed the script host's authoritative activation boundary.
+        // Keep that exact generation addressable so an F9 arriving during the
+        // handoff can cancel it instead of queuing a second presentation.
+        private readonly Dictionary<string, ReactorMenuPresentationRecord>
+            _dispatchingMenuPresentations =
+                new Dictionary<string, ReactorMenuPresentationRecord>(
+                    StringComparer.Ordinal);
+        private readonly Queue<ReactorMenuDismissalRecord> _menuDismissals =
+            new Queue<ReactorMenuDismissalRecord>();
         private readonly Dictionary<string, ReactorIdempotencyEntry> _idempotency =
             new Dictionary<string, ReactorIdempotencyEntry>(StringComparer.Ordinal);
         private readonly Queue<string> _idempotencyOrder = new Queue<string>();
         private long _eventSequence;
+        private bool _menuPresentationHostAvailable;
+        private ReactorMenuPresentationRecord? _activeMenuPresentation;
 
         private ReactorRegistry() { }
 
@@ -359,6 +529,17 @@ namespace ReactorV.Integration
                     throw new InvalidOperationException($"Extension '{descriptor.Id}' is already registered.");
                 if (_extensions.Count >= MaximumExtensions)
                     throw new InvalidOperationException("The Reactor extension limit was reached.");
+                if (descriptor.Capabilities.Contains(
+                        ReactorExtensionCapabilities.DefaultF9MenuOwner,
+                        StringComparer.Ordinal) &&
+                    _extensions.Values.Any(candidate =>
+                        candidate.Descriptor.Capabilities.Contains(
+                            ReactorExtensionCapabilities.DefaultF9MenuOwner,
+                            StringComparer.Ordinal)))
+                {
+                    throw new InvalidOperationException(
+                        "Only one Reactor extension may own managed physical F9.");
+                }
                 state = new ReactorExtensionState(descriptor, definition);
                 var summaryItems = new JArray(_extensions.Values
                     .Concat(new[] { state })
@@ -385,6 +566,36 @@ namespace ReactorV.Integration
                 return new JArray(_extensions.Values
                     .OrderBy(value => value.Descriptor.Id, StringComparer.Ordinal)
                     .Select(state => DescribeExtensionDetail(state.Descriptor, state.Definition, "menus")));
+            }
+        }
+
+        public bool HasExtensionCapability(string capability)
+        {
+            if (string.IsNullOrWhiteSpace(capability)) return false;
+            lock (_sync)
+            {
+                return _extensions.Values.Any(state =>
+                    state.Descriptor.Capabilities.Contains(
+                        capability,
+                        StringComparer.Ordinal));
+            }
+        }
+
+        public bool ExtensionHasCapability(
+            string extensionId,
+            string capability)
+        {
+            if (string.IsNullOrWhiteSpace(extensionId) ||
+                string.IsNullOrWhiteSpace(capability))
+            {
+                return false;
+            }
+            lock (_sync)
+            {
+                return _extensions.TryGetValue(extensionId, out var state) &&
+                    state.Descriptor.Capabilities.Contains(
+                        capability,
+                        StringComparer.Ordinal);
             }
         }
 
@@ -565,6 +776,7 @@ namespace ReactorV.Integration
             ReactorMenuDescriptor menu;
             ReactorMenuNode? node;
             string? actionId;
+            JObject boundParameters;
             lock (_sync)
             {
                 if (!_extensions.TryGetValue(extensionId, out state!) ||
@@ -583,9 +795,33 @@ namespace ReactorV.Integration
                 actionId = ReactorExtensionBuilder.ActionReference(node);
                 if (actionId == null || !state.Definition.Actions.ContainsKey(actionId))
                     return ReactorActionResult.Failure("menu_action_not_found", "The requested menu node has no registered action.");
+                boundParameters = node.BoundParametersSnapshot();
             }
 
-            return Invoke(extensionId, actionId, parameters, confirmed, idempotencyKey);
+            var detachedBrowserParameters = (JObject)parameters.DeepClone();
+            var boundNames = new HashSet<string>(
+                boundParameters.Properties().Select(property => property.Name),
+                StringComparer.OrdinalIgnoreCase);
+            var attemptedOverride = detachedBrowserParameters.Properties()
+                .FirstOrDefault(property => boundNames.Contains(property.Name));
+            if (attemptedOverride != null)
+                return ReactorActionResult.Failure(
+                    "bound_parameter_override",
+                    $"Browser parameters cannot replace host-bound parameter '{attemptedOverride.Name}'.");
+
+            var mergedParameters = (JObject)boundParameters.DeepClone();
+            foreach (var property in detachedBrowserParameters.Properties())
+                mergedParameters.Add(property.Name, property.Value.DeepClone());
+            if (!ReactorValidation.IsWithinDepth(
+                    mergedParameters,
+                    ReactorExtensionLimits.MaximumPayloadDepth) ||
+                Encoding.UTF8.GetByteCount(mergedParameters.ToString(Formatting.None)) >
+                    ReactorExtensionLimits.MaximumTransportPayload)
+                return ReactorActionResult.Failure(
+                    "invalid_params",
+                    "Merged menu action parameters exceed Reactor's transport limits.");
+
+            return Invoke(extensionId, actionId, mergedParameters, confirmed, idempotencyKey);
         }
 
         private static bool MenuInteractionAllowed(ReactorMenuNode node, string interaction)
@@ -759,6 +995,285 @@ namespace ReactorV.Integration
             }
         }
 
+        public bool TryPresentMenu(
+            Guid generation,
+            string extensionId,
+            string menuId,
+            JObject? context)
+        {
+            try
+            {
+                menuId = ReactorValidation.Identifier(menuId, nameof(menuId), 64, allowDots: true);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            var detachedContext = context == null ? new JObject() : (JObject)context.DeepClone();
+            if (!ReactorValidation.IsWithinDepth(
+                    detachedContext,
+                    ReactorExtensionLimits.MaximumPayloadDepth) ||
+                Encoding.UTF8.GetByteCount(detachedContext.ToString(Formatting.None)) >
+                    ReactorExtensionLimits.MaximumTransportPayload)
+                return false;
+
+            lock (_sync)
+            {
+                if (!_extensions.TryGetValue(extensionId, out var state) ||
+                    state.Generation != generation ||
+                    !_menuPresentationHostAvailable ||
+                    !state.Definition.Menus.ContainsKey(menuId))
+                    return false;
+                // A dismissal owns the global host until the script confirms
+                // that the exact active presentation has been hidden.  Do not
+                // let a retry turn the closing surface into an open-close-open
+                // burst while the host is still processing its hide request.
+                if (_activeMenuPresentation != null &&
+                    _activeMenuPresentation.IsDismissalRequested)
+                    return false;
+                // A key-repeat or a caller retry must update the one pending
+                // intent for this exact extension/menu, never consume another
+                // queue slot or create a later open-close-open burst.
+                RemoveMenuPresentationsLocked(state.Descriptor.Id, menuId);
+                if (_menuPresentations.Count >= MaximumPendingMenuPresentations)
+                    return false;
+                _menuPresentations.Enqueue(new ReactorMenuPresentationRecord(
+                    state.Descriptor.Id,
+                    state.Definition.Menus[menuId].Id,
+                    detachedContext));
+                return true;
+            }
+        }
+
+        public JArray DrainMenuPresentations()
+        {
+            lock (_sync)
+            {
+                var result = new JArray();
+                if (_menuPresentations.Count > 0)
+                {
+                    var presentation = _menuPresentations.Dequeue();
+                    _dispatchingMenuPresentations[presentation.PresentationId] =
+                        presentation;
+                    result.Add(presentation.ToJson());
+                }
+                return result;
+            }
+        }
+
+        public void SetMenuPresentationHostAvailable(bool available)
+        {
+            lock (_sync)
+            {
+                _menuPresentationHostAvailable = available;
+                if (!available)
+                {
+                    _menuPresentations.Clear();
+                    _dispatchingMenuPresentations.Clear();
+                    _menuDismissals.Clear();
+                    _activeMenuPresentation = null;
+                }
+            }
+        }
+
+        public bool MarkMenuPresentationActive(
+            string extensionId,
+            string menuId,
+            string presentationId,
+            out JObject? superseded)
+        {
+            superseded = null;
+            lock (_sync)
+            {
+                if (!_menuPresentationHostAvailable ||
+                    !_extensions.TryGetValue(extensionId, out var state) ||
+                    !state.Definition.Menus.ContainsKey(menuId) ||
+                    string.IsNullOrWhiteSpace(presentationId) ||
+                    presentationId.Length > 128)
+                    return false;
+                if (!_dispatchingMenuPresentations.TryGetValue(
+                        presentationId,
+                        out var dispatching) ||
+                    !string.Equals(
+                        dispatching.ExtensionId,
+                        state.Descriptor.Id,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(
+                        dispatching.MenuId,
+                        menuId,
+                        StringComparison.OrdinalIgnoreCase))
+                    return false;
+                _dispatchingMenuPresentations.Remove(presentationId);
+                if (_activeMenuPresentation != null)
+                {
+                    superseded = new ReactorMenuDismissalRecord(
+                        _activeMenuPresentation.ExtensionId,
+                        _activeMenuPresentation.MenuId,
+                        _activeMenuPresentation.PresentationId).ToJson();
+                }
+                _activeMenuPresentation = new ReactorMenuPresentationRecord(
+                    state.Descriptor.Id,
+                    state.Definition.Menus[menuId].Id,
+                    new JObject(),
+                    presentationId);
+                return true;
+            }
+        }
+
+        public bool CanMarkMenuPresentationReady(string presentationId)
+        {
+            lock (_sync)
+            {
+                return CanMarkMenuPresentationReadyLocked(presentationId);
+            }
+        }
+
+        public bool MarkMenuPresentationReady(string presentationId)
+        {
+            lock (_sync)
+            {
+                if (!CanMarkMenuPresentationReadyLocked(presentationId))
+                    return false;
+                _activeMenuPresentation!.IsReady = true;
+                return true;
+            }
+        }
+
+        private bool CanMarkMenuPresentationReadyLocked(string presentationId) =>
+            _menuPresentationHostAvailable &&
+            _activeMenuPresentation != null &&
+            !_activeMenuPresentation.IsDismissalRequested &&
+            string.Equals(
+                _activeMenuPresentation.PresentationId,
+                presentationId,
+                StringComparison.Ordinal);
+
+        public void ClearActiveMenuPresentation()
+        {
+            lock (_sync)
+            {
+                if (_activeMenuPresentation != null)
+                    RemoveMenuDismissalsLocked(
+                        _activeMenuPresentation.PresentationId);
+                _activeMenuPresentation = null;
+            }
+        }
+
+        public JObject? TakeActiveMenuPresentation()
+        {
+            lock (_sync)
+            {
+                if (_activeMenuPresentation == null) return null;
+                return TakeActiveMenuPresentationLocked(
+                    _activeMenuPresentation.PresentationId);
+            }
+        }
+
+        public JObject? AcknowledgeMenuPresentationHidden(
+            string presentationId)
+        {
+            if (string.IsNullOrWhiteSpace(presentationId) ||
+                presentationId.Length > 128)
+                return null;
+            lock (_sync)
+                return TakeActiveMenuPresentationLocked(presentationId);
+        }
+
+        public bool IsMenuPresented(Guid generation, string extensionId, string menuId)
+        {
+            try
+            {
+                menuId = ReactorValidation.Identifier(menuId, nameof(menuId), 64, allowDots: true);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            lock (_sync)
+            {
+                return _extensions.TryGetValue(extensionId, out var state) &&
+                    state.Generation == generation &&
+                    HasMenuPresentationIntentLocked(
+                        state.Descriptor.Id,
+                        menuId);
+            }
+        }
+
+        public bool IsMenuPresentationReady(
+            Guid generation,
+            string extensionId,
+            string menuId)
+        {
+            try
+            {
+                menuId = ReactorValidation.Identifier(menuId, nameof(menuId), 64, allowDots: true);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            lock (_sync)
+            {
+                return _extensions.TryGetValue(extensionId, out var state) &&
+                    state.Generation == generation &&
+                    _activeMenuPresentation != null &&
+                    _activeMenuPresentation.IsReady &&
+                    !_activeMenuPresentation.IsDismissalRequested &&
+                    string.Equals(
+                        _activeMenuPresentation.ExtensionId,
+                        state.Descriptor.Id,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        _activeMenuPresentation.MenuId,
+                        menuId,
+                        StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        public bool TryDismissMenu(Guid generation, string extensionId, string menuId)
+        {
+            try
+            {
+                menuId = ReactorValidation.Identifier(menuId, nameof(menuId), 64, allowDots: true);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            lock (_sync)
+            {
+                if (!_menuPresentationHostAvailable ||
+                    !_extensions.TryGetValue(extensionId, out var state) ||
+                    state.Generation != generation)
+                    return false;
+
+                // Cancel every matching not-yet-active generation before
+                // requesting dismissal of the active one. The active record
+                // remains authoritative until the script host acknowledges
+                // that exact generation hidden; a late open cannot cross this
+                // F9 transition boundary.
+                var cancelledPending = RemoveMenuPresentationsLocked(
+                    state.Descriptor.Id,
+                    menuId);
+                var dismissedActive = QueueActiveDismissalLocked(
+                    state.Descriptor.Id,
+                    menuId);
+                return cancelledPending || dismissedActive;
+            }
+        }
+
+        public JArray DrainMenuDismissals()
+        {
+            lock (_sync)
+            {
+                var result = new JArray();
+                while (_menuDismissals.Count > 0)
+                    result.Add(_menuDismissals.Dequeue().ToJson());
+                return result;
+            }
+        }
+
         public void NotifyLifecycle(ReactorLifecycleStage stage, JToken? payload)
         {
             ReactorExtensionState[] states;
@@ -794,7 +1309,9 @@ namespace ReactorV.Integration
                 candidate.Remove(menuId);
                 // Reject removal while another menu still points to this route.
                 ReactorExtensionBuilder.ValidateMenuReferences(candidate, state.Definition.Actions);
+                QueueActiveDismissalLocked(extensionId, menuId);
                 state.Definition.Menus.Remove(menuId);
+                RemoveMenuPresentationsLocked(extensionId, menuId);
                 return true;
             }
         }
@@ -807,6 +1324,7 @@ namespace ReactorV.Integration
                 if (_extensions.TryGetValue(extensionId, out var state) && state.Generation == generation)
                 {
                     removed = state;
+                    QueueActiveDismissalLocked(extensionId, null);
                     _extensions.Remove(extensionId);
                     RemoveExtensionStateLocked(extensionId);
                 }
@@ -814,7 +1332,9 @@ namespace ReactorV.Integration
             if (removed != null) InvokeLifecycle(removed, ReactorLifecycleStage.Unloading, null);
         }
 
-        public void Reset()
+        public void Reset(
+            JToken? unloadingPayload = null,
+            bool asynchronousUnloading = false)
         {
             ReactorExtensionState[] removed;
             lock (_sync)
@@ -822,11 +1342,36 @@ namespace ReactorV.Integration
                 removed = _extensions.Values.ToArray();
                 _extensions.Clear();
                 _events.Clear();
+                _menuPresentations.Clear();
+                _dispatchingMenuPresentations.Clear();
+                _menuDismissals.Clear();
                 _idempotency.Clear();
                 _idempotencyOrder.Clear();
                 _eventSequence = 0;
+                _menuPresentationHostAvailable = false;
+                _activeMenuPresentation = null;
             }
-            foreach (var state in removed) InvokeLifecycle(state, ReactorLifecycleStage.Unloading, null);
+            foreach (var state in removed)
+            {
+                if (!asynchronousUnloading)
+                {
+                    InvokeLifecycle(
+                        state,
+                        ReactorLifecycleStage.Unloading,
+                        unloadingPayload);
+                    continue;
+                }
+
+                // ScriptHookVDotNet raises Aborted on its shutdown path. An
+                // extension-controlled cleanup callback must never be able to
+                // hold that thread (and therefore GTA) indefinitely.
+                var capturedState = state;
+                var capturedPayload = unloadingPayload?.DeepClone();
+                ThreadPool.QueueUserWorkItem(_ => InvokeLifecycle(
+                    capturedState,
+                    ReactorLifecycleStage.Unloading,
+                    capturedPayload));
+            }
         }
 
         private ReactorExtensionState RequireCurrentLocked(Guid generation, string extensionId)
@@ -844,10 +1389,147 @@ namespace ReactorV.Integration
                 _events.Clear();
                 foreach (var value in retained) _events.Enqueue(value);
             }
+            if (_menuPresentations.Count > 0)
+            {
+                var retained = _menuPresentations.Where(value =>
+                    !string.Equals(value.ExtensionId, extensionId, StringComparison.OrdinalIgnoreCase)).ToArray();
+                _menuPresentations.Clear();
+                foreach (var value in retained) _menuPresentations.Enqueue(value);
+            }
+            foreach (var presentationId in _dispatchingMenuPresentations
+                .Where(value => string.Equals(
+                    value.Value.ExtensionId,
+                    extensionId,
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(value => value.Key)
+                .ToArray())
+            {
+                _dispatchingMenuPresentations.Remove(presentationId);
+            }
             foreach (var key in _idempotency.Keys
                 .Where(value => value.StartsWith(extensionId + "\0", StringComparison.OrdinalIgnoreCase))
                 .ToArray())
                 _idempotency.Remove(key);
+        }
+
+        private bool RemoveMenuPresentationsLocked(string extensionId, string menuId)
+        {
+            var removed = false;
+            if (_menuPresentations.Count > 0)
+            {
+                var retained = _menuPresentations.Where(value =>
+                    !string.Equals(value.ExtensionId, extensionId, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(value.MenuId, menuId, StringComparison.OrdinalIgnoreCase)).ToArray();
+                removed = retained.Length != _menuPresentations.Count;
+                _menuPresentations.Clear();
+                foreach (var value in retained) _menuPresentations.Enqueue(value);
+            }
+            foreach (var presentationId in _dispatchingMenuPresentations
+                .Where(value =>
+                    string.Equals(
+                        value.Value.ExtensionId,
+                        extensionId,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        value.Value.MenuId,
+                        menuId,
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(value => value.Key)
+                .ToArray())
+            {
+                removed |= _dispatchingMenuPresentations.Remove(presentationId);
+            }
+            return removed;
+        }
+
+        private bool HasMenuPresentationIntentLocked(
+            string extensionId,
+            string menuId)
+        {
+            if (_activeMenuPresentation != null &&
+                string.Equals(
+                    _activeMenuPresentation.ExtensionId,
+                    extensionId,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    _activeMenuPresentation.MenuId,
+                    menuId,
+                    StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return _menuPresentations.Any(value =>
+                       string.Equals(
+                           value.ExtensionId,
+                           extensionId,
+                           StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(
+                           value.MenuId,
+                           menuId,
+                           StringComparison.OrdinalIgnoreCase)) ||
+                _dispatchingMenuPresentations.Values.Any(value =>
+                    string.Equals(
+                        value.ExtensionId,
+                        extensionId,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        value.MenuId,
+                        menuId,
+                        StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool QueueActiveDismissalLocked(string extensionId, string? menuId)
+        {
+            if (_activeMenuPresentation == null ||
+                !string.Equals(
+                    _activeMenuPresentation.ExtensionId,
+                    extensionId,
+                    StringComparison.OrdinalIgnoreCase) ||
+                (menuId != null && !string.Equals(
+                    _activeMenuPresentation.MenuId,
+                    menuId,
+                    StringComparison.OrdinalIgnoreCase)))
+                return false;
+            if (_activeMenuPresentation.IsDismissalRequested)
+                return true;
+            while (_menuDismissals.Count >= MaximumPendingMenuDismissals)
+                _menuDismissals.Dequeue();
+            _activeMenuPresentation.IsDismissalRequested = true;
+            _activeMenuPresentation.IsReady = false;
+            _menuDismissals.Enqueue(new ReactorMenuDismissalRecord(
+                _activeMenuPresentation.ExtensionId,
+                _activeMenuPresentation.MenuId,
+                _activeMenuPresentation.PresentationId));
+            return true;
+        }
+
+        private JObject? TakeActiveMenuPresentationLocked(
+            string presentationId)
+        {
+            if (_activeMenuPresentation == null ||
+                !string.Equals(
+                    _activeMenuPresentation.PresentationId,
+                    presentationId,
+                    StringComparison.Ordinal))
+                return null;
+
+            var result = new ReactorMenuDismissalRecord(
+                _activeMenuPresentation.ExtensionId,
+                _activeMenuPresentation.MenuId,
+                _activeMenuPresentation.PresentationId).ToJson();
+            _activeMenuPresentation = null;
+            RemoveMenuDismissalsLocked(presentationId);
+            return result;
+        }
+
+        private void RemoveMenuDismissalsLocked(string presentationId)
+        {
+            if (_menuDismissals.Count == 0) return;
+            var retained = _menuDismissals.Where(value => !string.Equals(
+                value.PresentationId,
+                presentationId,
+                StringComparison.Ordinal)).ToArray();
+            _menuDismissals.Clear();
+            foreach (var value in retained) _menuDismissals.Enqueue(value);
         }
 
         private void TrimIdempotencyLocked()
@@ -911,7 +1593,10 @@ namespace ReactorV.Integration
         }
     }
 
-    internal sealed class ReactorExtensionHandle : IReactorExtensionHandle
+    internal sealed class ReactorExtensionHandle :
+        IReactorExtensionHandle,
+        IReactorMenuPresentationHandle,
+        IReactorMenuPresentationStateHandle
     {
         private readonly ReactorRegistry _registry;
         private readonly Guid _generation;
@@ -945,6 +1630,33 @@ namespace ReactorV.Integration
         {
             if (System.Threading.Interlocked.CompareExchange(ref _disposed, 0, 0) != 0) return false;
             return _registry.TryPublish(_generation, Descriptor.Id, eventId, payload);
+        }
+
+        public bool TryPresentMenu(string menuId, JObject? context = null)
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _disposed, 0, 0) != 0) return false;
+            return _registry.TryPresentMenu(_generation, Descriptor.Id, menuId, context);
+        }
+
+        public bool IsMenuPresented(string menuId)
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _disposed, 0, 0) != 0) return false;
+            return _registry.IsMenuPresented(_generation, Descriptor.Id, menuId);
+        }
+
+        public bool IsMenuPresentationReady(string menuId)
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _disposed, 0, 0) != 0) return false;
+            return _registry.IsMenuPresentationReady(
+                _generation,
+                Descriptor.Id,
+                menuId);
+        }
+
+        public bool TryDismissMenu(string menuId)
+        {
+            if (System.Threading.Interlocked.CompareExchange(ref _disposed, 0, 0) != 0) return false;
+            return _registry.TryDismissMenu(_generation, Descriptor.Id, menuId);
         }
 
         public void Dispose()

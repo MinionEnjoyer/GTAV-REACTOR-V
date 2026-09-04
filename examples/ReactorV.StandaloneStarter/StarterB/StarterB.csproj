@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\Starter.props" />
+  <PropertyGroup>
+    <AssemblyName>ReactorV.StarterB</AssemblyName>
+    <DefineConstants>$(DefineConstants);STARTER_B</DefineConstants>
+  </PropertyGroup>
+</Project>

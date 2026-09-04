@@ -10,6 +10,15 @@
     <Nullable>enable</Nullable>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <Version>0.2.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))=/_/</PathMap>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,10 +27,18 @@
     <ProjectReference Include="..\ReactorV.Runtime\RageWebUI.Runtime.csproj" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\BorderConnectedBlackNormalizer.cs" Link="BorderConnectedBlackNormalizer.cs" />
+    <Compile Include="..\Shared\GbayPresentationTimingPolicy.cs" Link="GbayPresentationTimingPolicy.cs" />
+    <Compile Include="..\Shared\NativeWindowPresentationPolicy.cs" Link="NativeWindowPresentationPolicy.cs" />
   </ItemGroup>
 </Project>

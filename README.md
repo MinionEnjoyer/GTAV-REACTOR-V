@@ -1,159 +1,142 @@
+<p align="center">
+  <img src="web/public/ragewebui-logo.png" alt="REACTOR V logo" width="240">
+</p>
+
 # REACTOR V
 
-**REACTOR** stands for **Real-time Embedded Application Component Toolkit &
-Overlay Runtime**. REACTOR V is a React/HTML overlay framework for GTA V Story
-Mode. Version 0.2.0 renders the browser into GTA's swap chain, so the same menu
-works in windowed, borderless, and fullscreen modes:
+**Real-time Embedded Application Component Toolkit & Overlay Runtime**
 
-- Direct3D 11 for GTA V Legacy.
-- Direct3D 12 for GTA V Enhanced.
-- A WebView2 desktop-window fallback for systems where the DirectX hook cannot
-  initialize.
+A shared React/HTML overlay framework for **GTA V Story Mode**, created by
+**MinionEnjoyer**. Reactor hosts the interface; each mod keeps ownership of its
+gameplay, settings, and saved data. ALLIN1 is an integration, not a prerequisite
+for registering your own Reactor menus.
 
-The included first-run splash is a lightweight example of the framework. Its
-centered logo and live dependency checks render directly over gameplay, while
-the typed bridge remains available for complete interactive interfaces.
-Reactor preloads that interface hidden on its own UI thread, then reveals one
-complete frame only after both the browser content and Story Mode are ready.
-This behavior is built into Reactor itself, so it is identical for direct GTA
-launches and launches started through ALLIN1.
+[Downloads](https://github.com/MinionEnjoyer/GTAV-REACTOR-V/releases) ·
+[Managed extension API](docs/EXTENSIONS.md) · [Browser API](docs/API.md) ·
+[Architecture](docs/ARCHITECTURE.md)
 
-`ReactorV.Bootstrap.asi` starts at the game's native plug-in stage. It owns only
-the lightweight startup status surface and cache-warmer launch; it does not
-load the CLR, create a browser, call GTA natives, or install graphics hooks.
-The managed Reactor runtime takes ownership after Story Mode and the browser
-are both ready.
+## Edition builds — 0.2.0 preview
 
-Do not use this mod in GTA Online.
+Fullscreen overlays have been confirmed in local playtesting on both editions.
+These are **edition-specific previews**, not a claim of compatibility with all
+game updates or graphics configurations. Executable identity checks remain
+enabled. Install **one** matching runtime ZIP, never both.
 
-## Requirements
+| Download | Tested game version | In-frame renderer |
+| --- | --- | --- |
+| `ReactorV-0.2.0-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
+| `ReactorV-0.2.0-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
 
-- 64-bit GTA V Legacy or Enhanced, Story Mode.
-- A current edition-compatible Script Hook V.
-- ScriptHookVDotNet v3. Enhanced installations need a matched build that
-  exposes the SHVDN v3 API.
-- .NET Framework 4.8.
-- Microsoft Edge WebView2 Runtime only when using the `windowed` renderer or
-  when `auto` falls back to it. The DirectX renderer's CEF runtime is included.
+The historical `live-test` filenames and markers identify the guarded preview
+profiles. These downloads are full runtime packages, **not incremental patches**.
+Legacy includes `ReactorV.LegacyCpuFrames.enabled`; removing it changes the
+renderer route and is not a supported troubleshooting step for this preview.
+The Legacy producer is capped at 15 UI frames/second; this does not cap GTA FPS.
 
-The DirectX compositor currently supports D3D11 and D3D12. GTA V Enhanced's
-Vulkan renderer is not supported; select DirectX 12 in the game's graphics
-settings.
-
-## Build an installable ZIP
-
-Building requires Node.js/pnpm, CMake 3.24+, and a Windows x64 C++ compiler.
-From this directory:
-
-```powershell
-corepack enable
-./build-package.ps1
-```
-
-The builder runs the native unit test, React tests, .NET tests, and six-second
-D3D11 and D3D12 harness smoke tests before creating:
-
-```text
-artifacts/ReactorV-0.2.0.zip
-artifacts/ReactorV-0.2.0.zip.sha256
-```
-
-Use `-SkipTests` for a compile/package-only build, or `-SkipHarness` to retain
-unit tests while skipping the interactive graphics smoke tests.
+Do not use Reactor in GTA Online. Unsupported executables disable the native
+render route instead of attempting unverified hooks. Vulkan is not supported.
 
 ## Install
 
-1. Install Script Hook V and ScriptHookVDotNet for your GTA edition.
-2. Extract the release ZIP into the directory containing `GTA5.exe` or
-   `GTA5_Enhanced.exe`. The early bootstrap will be at
-   `ReactorV.Bootstrap.asi`, and the managed assembly will be at
-   `scripts/ReactorV/RageWebUI.Script.dll`.
-3. Launch Story Mode in fullscreen, borderless, or windowed mode.
-4. Press **F10** to open or close the menu. **Escape** also closes it.
+1. Close GTA. Install an edition-compatible **Script Hook V / ASI loader** and
+   **ScriptHookVDotNet v3** runtime. Enhanced requires its compatible v3 runtime.
+   These third-party game-hook dependencies are **not included**.
+2. Ensure .NET Framework 4.8 and Microsoft Edge WebView2 Runtime are installed.
+   CEF/native renderer dependencies are included in the runtime ZIP.
+3. Download the matching edition ZIP and its `.sha256` file from Releases. Check
+   the ZIP using `Get-FileHash -Algorithm SHA256` before extracting it.
+4. Extract into the GTA folder containing `GTA5.exe` or `GTA5_Enhanced.exe`.
+   The layout is:
 
-Configuration lives at `scripts/ReactorV/ReactorV.json`:
+   ```text
+   GTA root/
+   ├─ ReactorV.Bootstrap.asi
+   ├─ ReactorV.ScriptProbe.asi
+   ├─ ReactorV.RenderHook.asi
+   ├─ plugins/ReactorV/              browser host, renderer, UI, edition marker
+   └─ scripts/ReactorV/              managed runtime and configuration
+   ```
 
-```json
-{
-  "toggleKey": "F10",
-  "startVisible": false,
-  "renderer": "auto",
-  "directXFrameRate": 60,
-  "enableDevTools": true,
-  "telemetryIntervalMilliseconds": 100
-}
-```
+5. Launch GTA yourself. **F9** opens/closes Reactor's About panel on the main
+   menu. In Story Mode, the installed mod owns its menu and keybindings; ALLIN1
+   uses F9 for GBAY. Standalone starters use **F6** and **F7**. Escape/click-close
+   behavior is managed by the active interface.
 
-`renderer` accepts `auto`, `directx`, or `windowed`. `auto` tries the in-process
-DirectX renderer first and falls back to the desktop WebView2 renderer.
-`directXFrameRate` is clamped to 15-60. Set `enableDevTools` to `false` for a
-public release.
+Reactor starts when GTA starts; the ALLIN1 launcher is not required. The early
+bootstrap can display progress before the managed provider is ready. Rendering
+readiness does not imply that ScriptHook gameplay callbacks are ready yet.
 
-## Run the DirectX harness
+For an existing ALLIN1 installation, back up the runtime first and preserve
+third-party extension assets/settings. The source-tree
+`tools/install-live-test-package.ps1` provides edition/hash checks and ownership
+preservation. Do not delete the entire `plugins/ReactorV` folder to uninstall a
+single mod: other mods may depend on it.
 
-The packaged harness opens the real example React overlay against a fake GTA
-API, without launching GTA:
+## Configuration and diagnostics
+
+`scripts/ReactorV/ReactorV.json` controls the managed interface. Defaults include
+F9, `startVisible: false`, `firstRunSplash: false`, `renderer: auto`, and developer
+tools disabled. `plugins/ReactorV/ReactorV.Preloader.json` controls the early
+browser host. Edition preview packages enable the native browser route and ship
+the matching version-gated marker; keep those files together.
+
+Logs are written beneath `%LOCALAPPDATA%\ReactorV`. When reporting an issue,
+include the edition, exact game version, display mode, which menu stage failed,
+and the relevant session log. Do not publish personal paths or unrelated logs.
+
+## Make a mod with Reactor
+
+Reference the existing `RageWebUI.Core.dll`, register a unique extension ID,
+declare typed actions and menus, and dispose the registration when your script
+unloads. The browser cannot invent a native call or write a file: the owning
+mod performs authorized actions on the GTA script thread.
+
+The **Starter Kit 0.1.0 preview** includes two independently built SHVDN scripts
+and source prefabs for settings, scrolling lists, grids, confirmations, and
+status panels. It includes no Reactor runtime and does not modify ALLIN1.
+Both samples share one Core registry, without claiming F9 or automatically
+opening a menu. Their settings are deliberately in-memory demonstrations.
+
+From an extracted starter kit:
 
 ```powershell
-cd scripts/ReactorV
-./RageWebUI.Harness.exe --api d3d11
-./RageWebUI.Harness.exe --api d3d12
+dotnet build source/StarterA/StarterA.csproj -c Release
+powershell -NoProfile -ExecutionPolicy Bypass -File Manage-Starter.ps1 -Mode Check -GameRoot 'C:\Games\GTAV' -PackageRoot packages/StarterA
 ```
 
-Add `--smoke` for an automated six-second verification, or use `--width`,
-`--height`, `--duration`, and `--ui` to customize the run. See
-[DIRECTX-HARNESS.md](docs/DIRECTX-HARNESS.md) for the pass criteria and controls.
+Use `-Mode Install` after Check, and `-Mode Uninstall` to remove that starter
+only. Substitute `StarterB` for the F7 sample. The process-scoped execution
+policy flag does not change the machine policy; run only scripts you trust.
+The installer blocks incompatible dependencies, unowned/modified files, and
+cross-mod path claims. A missing owned DLL is reported as repair-required.
+It does not claim that filesystem checks prove live graphics compatibility.
 
-## Work on the React UI
+Runtime/package separation from the built-in ALLIN1 presentation adapter is
+still in progress. This is not yet a final, general-purpose dependency manager.
+
+## Build and verify from source
+
+Requirements: .NET SDK with .NET Framework targeting support, Node.js/pnpm,
+CMake 3.24+, Visual Studio 2022 x64 C++, and the
+[official ScriptHookV SDK](https://www.dev-c.com/gtav/scripthookv/).
+Do not commit or redistribute the ScriptHook SDK with Reactor.
 
 ```powershell
-cd web
-pnpm install --frozen-lockfile
-pnpm dev
+./build-package.ps1 -IncludeExperimentalLegacyRenderHook -ScriptHookSdkRoot 'C:\SDKs\ScriptHookV'
+./build-package.ps1 -IncludeExperimentalEnhancedRenderHook -ScriptHookSdkRoot 'C:\SDKs\ScriptHookV'
+./tools/build-standalone-starter-kit.ps1
 ```
 
-Opening the Vite URL in a normal browser activates `DemoTransport`, so every
-screen and action can be developed without GTA. In the DirectX renderer the SDK
-automatically uses `CefSharp.PostMessage`; in the windowed renderer it uses
-`window.chrome.webview`.
+Run the edition builds sequentially: they share staging. Each edition package
+must pass native CTest (no skips), managed and browser tests, graphics/browser
+harnesses, required-file and export checks, path-leak scans, and size limits.
+`-SkipTests`, `-SkipHarness`, or Debug are rejected for edition-hook packages.
+Build receipts stay under `artifacts/harness`; player ZIPs exclude harness
+executables, development logs, caches, and debug symbols. Automated graphics
+harnesses are not a substitute for live GTA testing.
 
-The public browser SDK is in `web/src/gta/bridge.ts`. Protocol v2 also exposes
-runtime discovery, extension actions, declarative menus, subscriptions,
-lifecycle, semantic input, cancellation, confirmation, and idempotency:
+For browser-only development, run `pnpm install --frozen-lockfile` and `pnpm dev`
+under `web`. The browser transport uses a mock game API outside GTA.
 
-```ts
-import { bridge, gta } from './gta/bridge'
-
-await gta.vehicle.spawn('sultan')
-await gta.player.teleport({ x: -75.3, y: -818.9, z: 326.2 })
-
-const unsubscribe = bridge.on('game.state', (state) => {
-  console.log(state.player.health)
-})
-```
-
-Plain HTML pages can load the production `ui/ragewebui.js` module and use
-`window.rageWebUI.gta` without React or a bundler.
-
-See [API.md](docs/API.md) for every browser method and event,
-[EXTENSIONS.md](docs/EXTENSIONS.md) for integrating another managed gameplay
-project, and
-[ARCHITECTURE.md](docs/ARCHITECTURE.md) for rendering, thread ownership, and
-security boundaries.
-
-## Project layout
-
-```text
-ReactorV/
-├─ native/                    early bootstrap, D3D11/D3D12 compositor, and tests
-├─ src/ReactorV.Core/         protocol validation and bounded request queue
-├─ src/ReactorV.DirectX/      CEF off-screen browser and native interop
-├─ src/ReactorV.Runtime/      renderer host and WebView2 fallback
-├─ src/ReactorV.Script/       ScriptHook game API and renderer selection
-├─ src/ReactorV.Harness/      standalone renderer/React integration harness
-├─ examples/                  compiled managed-extension examples
-├─ web/                       React example, typed SDK, and browser mock
-├─ tests/                     protocol and queue tests
-├─ docs/                      API, architecture, and harness guides
-└─ build-package.ps1          verified release builder
-```
+See [the renderer harness guide](docs/DIRECTX-HARNESS.md) and
+[live acceptance guide](docs/LIVE-ACCEPTANCE.md) for deeper validation.

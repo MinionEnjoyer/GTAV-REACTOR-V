@@ -6,11 +6,11 @@ namespace RageWebUI.Script.Configuration
 {
     internal sealed class OverlayConfiguration
     {
-        public string ToggleKey { get; set; } = "F10";
+        public string ToggleKey { get; set; } = "F9";
 
         public bool StartVisible { get; set; }
 
-        public bool ShowFirstRunSplash { get; set; } = true;
+        public bool ShowFirstRunSplash { get; set; }
 
         public bool EnableDevTools { get; set; }
 

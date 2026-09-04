@@ -1,11 +1,13 @@
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using RageWebUI.Windowing;
 
 namespace RageWebUI.Script.Browser
 {
     internal static class NativeMethods
     {
+        private const int VirtualKeyLeftButton = 0x01;
         internal const int GwlHwndParent = -8;
         internal const uint SwpNoActivate = 0x0010;
         internal const uint SwpShowWindow = 0x0040;
@@ -37,6 +39,9 @@ namespace RageWebUI.Script.Browser
 
         [DllImport("user32.dll")]
         internal static extern bool IsIconic(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
 
         [DllImport("user32.dll", SetLastError = true)]
         internal static extern bool SetWindowPos(
@@ -72,6 +77,24 @@ namespace RageWebUI.Script.Browser
             bounds = new Rectangle(origin.X, origin.Y, width, height);
             return true;
         }
+
+        internal static IntPtr ResolveGameWindow(
+            uint processId,
+            IntPtr preferred,
+            out string detail) =>
+            Win32GameWindowLocator.Resolve(processId, preferred, IntPtr.Zero, out detail);
+
+        internal static bool IsGameForeground(IntPtr window) =>
+            Win32GameWindowLocator.IsForegroundOrOwnedBy(window);
+
+        internal static void SamplePhysicalLeftButton(
+            out bool down,
+            out bool pressedSinceLastSample)
+        {
+            var state = GetAsyncKeyState(VirtualKeyLeftButton);
+            down = (state & 0x8000) != 0;
+            pressedSinceLastSample = (state & 0x0001) != 0;
+        }
+
     }
 }
-

@@ -1,7 +1,7 @@
 {
-  "toggleKey": "F10",
+  "toggleKey": "F9",
   "startVisible": false,
-  "showFirstRunSplash": true,
+  "showFirstRunSplash": false,
   "renderer": "auto",
   "directXFrameRate": 30,
   "enableDevTools": false,

@@ -12,6 +12,14 @@
     <Version>0.2.0</Version>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))=/_/</PathMap>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ReactorV.Core\RageWebUI.Core.csproj" />
     <ProjectReference Include="..\ReactorV.DirectX\RageWebUI.DirectX.csproj" />
@@ -26,11 +34,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
+    <Compile Include="..\Shared\Win32GameWindowLocator.cs" Link="Win32GameWindowLocator.cs" />
     <Compile Include="..\Shared\OverlayPresentationPolicy.cs" Link="OverlayPresentationPolicy.cs" />
     <Compile Include="..\Shared\WebView2EnvironmentFactory.cs" Link="WebView2EnvironmentFactory.cs" />
     <Compile Include="..\Shared\WebView2LocalPagePolicy.cs" Link="WebView2LocalPagePolicy.cs" />
     <Compile Include="..\Shared\WebView2LocalPage.cs" Link="WebView2LocalPage.cs" />
     <Compile Include="..\Shared\WebView2ReadinessPolicy.cs" Link="WebView2ReadinessPolicy.cs" />
     <Compile Include="..\Shared\WebView2PageReadiness.cs" Link="WebView2PageReadiness.cs" />
+    <Compile Include="..\Shared\WebView2ProcessFailurePolicy.cs" Link="WebView2ProcessFailurePolicy.cs" />
+    <Compile Include="..\Shared\WindowedInputPolicy.cs" Link="WindowedInputPolicy.cs" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\Starter.props" />
+  <PropertyGroup><AssemblyName>ReactorV.StarterA</AssemblyName></PropertyGroup>
+</Project>

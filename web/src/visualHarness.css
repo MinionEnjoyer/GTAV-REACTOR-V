@@ -1,0 +1,19 @@
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+
+body {
+  background:
+    linear-gradient(90deg, rgba(7, 14, 10, .30), rgba(7, 14, 10, .08)),
+    radial-gradient(circle at 76% 45%, #b7977e 0 7%, transparent 7.4%),
+    linear-gradient(165deg, #47645a 0 42%, #886f5f 42% 56%, #313c38 56%);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  content: "";
+  background-image:
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 96px 96px;
+  pointer-events: none;
+}

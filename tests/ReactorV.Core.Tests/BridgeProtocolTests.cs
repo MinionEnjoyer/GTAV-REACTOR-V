@@ -92,6 +92,7 @@ public sealed class BridgeProtocolTests
     [InlineData("runtime.handshake")]
     [InlineData("runtime.describe")]
     [InlineData("overlay.setVisibility")]
+    [InlineData("overlay.setState")]
     [InlineData("overlay.setInputMode")]
     [InlineData("extensions.list")]
     [InlineData("extensions.invoke")]

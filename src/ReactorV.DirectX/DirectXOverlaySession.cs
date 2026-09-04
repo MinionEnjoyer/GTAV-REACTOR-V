@@ -16,7 +16,7 @@ namespace RageWebUI.DirectX
         private readonly string _uiDirectory;
         private readonly string _runtimeDirectory;
         private readonly string _cacheDirectory;
-        private readonly BridgeBroker _broker;
+        private readonly IBridgeMessageSink _bridgeSink;
         private readonly int _frameRate;
         private readonly bool _enableDevTools;
         private readonly bool _useGameCursor;
@@ -35,7 +35,7 @@ namespace RageWebUI.DirectX
             string uiDirectory,
             string runtimeDirectory,
             string cacheDirectory,
-            BridgeBroker broker,
+            IBridgeMessageSink bridgeSink,
             int initialWidth,
             int initialHeight,
             int frameRate = 60,
@@ -47,7 +47,7 @@ namespace RageWebUI.DirectX
             _uiDirectory = uiDirectory;
             _runtimeDirectory = runtimeDirectory;
             _cacheDirectory = cacheDirectory;
-            _broker = broker;
+            _bridgeSink = bridgeSink ?? throw new ArgumentNullException(nameof(bridgeSink));
             _lastWidth = Math.Max(1, initialWidth);
             _lastHeight = Math.Max(1, initialHeight);
             _inputWidth = _lastWidth;
@@ -179,7 +179,7 @@ namespace RageWebUI.DirectX
                 _uiDirectory,
                 _runtimeDirectory,
                 _cacheDirectory,
-                _broker,
+                _bridgeSink,
                 _lastWidth,
                 _lastHeight,
                 _frameRate,

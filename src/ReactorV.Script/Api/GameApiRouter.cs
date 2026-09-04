@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using GTA;
 using GTA.Math;
+using GTA.Native;
 using GTA.UI;
 using Newtonsoft.Json.Linq;
 using RageWebUI.Core;
@@ -27,6 +28,7 @@ namespace RageWebUI.Script.Api
         private readonly Func<string> _rendererName;
         private readonly Action<string, Exception> _logFailure;
         private readonly Action _browserReady;
+        private readonly Func<string, bool> _menuPresentationReady;
         private readonly Dictionary<string, EventSubscriptionState> _subscriptions =
             new Dictionary<string, EventSubscriptionState>(StringComparer.Ordinal);
         private readonly Dictionary<string, JToken> _latestEvents =
@@ -44,6 +46,7 @@ namespace RageWebUI.Script.Api
                 () => "exclusive",
                 rendererName,
                 null,
+                null,
                 null)
         {
         }
@@ -55,7 +58,8 @@ namespace RageWebUI.Script.Api
             Func<string> inputMode,
             Func<string>? rendererName = null,
             Action<string, Exception>? logFailure = null,
-            Action? browserReady = null)
+            Action? browserReady = null,
+            Func<string, bool>? menuPresentationReady = null)
         {
             _setOverlayVisible = setOverlayVisible ?? throw new ArgumentNullException(nameof(setOverlayVisible));
             _overlayVisible = overlayVisible ?? throw new ArgumentNullException(nameof(overlayVisible));
@@ -64,6 +68,7 @@ namespace RageWebUI.Script.Api
             _rendererName = rendererName ?? (() => "Unknown");
             _logFailure = logFailure ?? ((_, __) => { });
             _browserReady = browserReady ?? (() => { });
+            _menuPresentationReady = menuPresentationReady ?? (_ => false);
         }
 
         public BridgeResponse Dispatch(BridgeRequest request)
@@ -90,6 +95,9 @@ namespace RageWebUI.Script.Api
                         _setOverlayVisible(false);
                         result = new JObject { ["visible"] = false };
                         break;
+                    case "overlay.presentationReady":
+                        result = MarkMenuPresentationReady(request.Parameters);
+                        break;
                     case "runtime.handshake":
                         _browserReady();
                         result = Handshake(request.Parameters, request.ProtocolVersion);
@@ -97,8 +105,18 @@ namespace RageWebUI.Script.Api
                     case "runtime.describe":
                         result = DescribeRuntime();
                         break;
+                    case StartupStatusContract.Method:
+                        if (request.Parameters.Count != 0)
+                            throw new ApiException(
+                                "invalid_params",
+                                "startup.getStatus does not accept parameters.");
+                        result = GetStartupStatus();
+                        break;
                     case "overlay.setVisibility":
                         result = SetOverlayVisibility(request.Parameters);
+                        break;
+                    case "overlay.setState":
+                        result = SetOverlayState(request.Parameters);
                         break;
                     case "overlay.setInputMode":
                         result = SetOverlayInputMode(request.Parameters);
@@ -132,6 +150,9 @@ namespace RageWebUI.Script.Api
                         break;
                     case "ui.notify":
                         result = Notify(request.Parameters);
+                        break;
+                    case "ui.playMenuCue":
+                        result = PlayMenuCue(request.Parameters);
                         break;
                     case "player.heal":
                         result = HealPlayer();
@@ -324,6 +345,9 @@ namespace RageWebUI.Script.Api
                 EventDescriptor("overlay.snapshot", "game.state", replay: true),
                 EventDescriptor("game.state", "game.state", replay: true),
                 EventDescriptor("runtime.lifecycle", "events.lifecycle", replay: true),
+                EventDescriptor(StartupStatusContract.EventName, "startup.status", replay: true),
+                EventDescriptor("menu.presentation", "menu.presentation", replay: true),
+                EventDescriptor("menu.dismissed", "menu.presentation", replay: true),
                 EventDescriptor("input.action", "input.semantic", replay: false));
             return new JObject
             {
@@ -363,21 +387,96 @@ namespace RageWebUI.Script.Api
                         "invalid_params",
                         "'visibility' must be 'visible', 'hidden', or 'toggle'.");
             }
+            if (!OverlayApiStatePolicy.CanExposeVisibleSurface(
+                    visible,
+                    _inputMode()))
+            {
+                throw new ApiException(
+                    "invalid_state",
+                    "A visible overlay cannot use game input mode. Use overlay.setState to set visibility and inputMode together.");
+            }
             _setOverlayVisible(visible);
+            return OverlayState(visible);
+        }
+
+        private JObject SetOverlayState(JObject parameters)
+        {
+            var visibility = RequestParameters.RequiredString(
+                parameters,
+                "visibility",
+                16).ToLowerInvariant();
+            var mode = RequireOverlayInputMode(parameters, "inputMode");
+            bool visible;
+            switch (visibility)
+            {
+                case "visible":
+                    visible = true;
+                    break;
+                case "hidden":
+                    visible = false;
+                    break;
+                case "toggle":
+                    visible = !_overlayVisible();
+                    break;
+                default:
+                    throw new ApiException(
+                        "invalid_params",
+                        "'visibility' must be 'visible', 'hidden', or 'toggle'.");
+            }
+            if (!OverlayApiStatePolicy.CanExposeVisibleSurface(visible, mode))
+            {
+                throw new ApiException(
+                    "invalid_state",
+                    "A visible overlay cannot use game input mode.");
+            }
+
+            // Both writes execute inside this one game-thread dispatch. Open
+            // acquires input before publishing pixels; close withdraws pixels
+            // before returning input to GTA. Neither direction can expose a
+            // visible surface while the game owns its controls.
+            if (visible)
+            {
+                _setInputMode(mode);
+                _setOverlayVisible(true);
+            }
+            else
+            {
+                _setOverlayVisible(false);
+                _setInputMode(mode);
+            }
             return OverlayState(visible);
         }
 
         private JObject SetOverlayInputMode(JObject parameters)
         {
-            var mode = RequestParameters.RequiredString(parameters, "mode", 16).ToLowerInvariant();
-            if (mode != "game" && mode != "menu" && mode != "pointer" && mode != "exclusive")
+            var mode = RequireOverlayInputMode(parameters, "mode");
+            if (!OverlayApiStatePolicy.CanExposeVisibleSurface(
+                    _overlayVisible(),
+                    mode))
             {
                 throw new ApiException(
-                    "invalid_params",
-                    "'mode' must be 'game', 'menu', 'pointer', or 'exclusive'.");
+                    "invalid_state",
+                    "Game input mode cannot be applied while the overlay is visible. Hide it atomically with overlay.setState.");
             }
             _setInputMode(mode);
             return OverlayState(_overlayVisible());
+        }
+
+        private static string RequireOverlayInputMode(
+            JObject parameters,
+            string parameterName)
+        {
+            var mode = RequestParameters.RequiredString(
+                parameters,
+                parameterName,
+                16).ToLowerInvariant();
+            if (!OverlayApiStatePolicy.IsSupportedInputMode(mode))
+            {
+                throw new ApiException(
+                    "invalid_params",
+                    $"'{parameterName}' must be 'game', 'menu', 'interactive-menu', 'pointer', or 'exclusive'.");
+            }
+            return mode;
         }
 
         private JObject OverlayState(bool visible) => new JObject
@@ -515,6 +614,19 @@ namespace RageWebUI.Script.Api
             return new JObject { ["removed"] = _subscriptions.Remove(id) };
         }
 
+        private JObject MarkMenuPresentationReady(JObject parameters)
+        {
+            var presentationId = RequestParameters.RequiredString(parameters, "presentationId", 128);
+            if (!MenuPresentationPolicy.IsValidPresentationId(presentationId))
+                throw new ApiException("invalid_parameters", "presentationId is invalid.");
+
+            return new JObject
+            {
+                ["presentationId"] = presentationId,
+                ["accepted"] = _menuPresentationReady(presentationId),
+            };
+        }
+
         private JObject GetRuntimeStatus()
         {
             var process = Process.GetCurrentProcess();
@@ -563,18 +675,25 @@ namespace RageWebUI.Script.Api
             "game.state",
             "input.semantic",
             "menu.actions",
+            "menu.audio",
             "menu.discovery",
+            "menu.presentation",
             "overlay.input",
+            "overlay.state",
             "overlay.visibility",
             "runtime.discovery",
+            "startup.status",
         };
 
         private static JObject[] RuntimeMethods() => new[]
         {
             MethodDescriptor("runtime.handshake", "runtime.discovery"),
             MethodDescriptor("runtime.describe", "runtime.discovery"),
+            MethodDescriptor(StartupStatusContract.Method, "startup.status"),
             MethodDescriptor("overlay.ready", "runtime.discovery"),
             MethodDescriptor("overlay.close", "overlay.visibility"),
+            MethodDescriptor("overlay.presentationReady", "menu.presentation"),
+            MethodDescriptor("overlay.setState", "overlay.state"),
             MethodDescriptor("overlay.setVisibility", "overlay.visibility"),
             MethodDescriptor("overlay.setInputMode", "overlay.input"),
             MethodDescriptor("extensions.list", "extension.discovery"),
@@ -587,6 +706,7 @@ namespace RageWebUI.Script.Api
             MethodDescriptor("events.unsubscribe", "events.subscriptions"),
             MethodDescriptor("game.getState", "game.state"),
             MethodDescriptor("ui.notify", "game.actions"),
+            MethodDescriptor("ui.playMenuCue", "menu.audio"),
             MethodDescriptor("player.heal", "game.actions"),
             MethodDescriptor("player.setInvincible", "game.actions"),
             MethodDescriptor("player.setWantedLevel", "game.actions"),
@@ -623,6 +743,9 @@ namespace RageWebUI.Script.Api
                 "overlay.snapshot",
                 "game.state",
                 "runtime.lifecycle",
+                StartupStatusContract.EventName,
+                "menu.presentation",
+                "menu.dismissed",
                 "input.action",
             };
             var summaries = ReactorHostApi.DescribeExtensionSummaries()["items"] as JArray ?? new JArray();
@@ -733,6 +856,18 @@ namespace RageWebUI.Script.Api
             return Status(id, name, true, "Loaded", required: true);
         }
 
+        internal static JObject GetStartupStatus() => StartupStatusContract.CreateSnapshot(
+            reactorReady: true,
+            nativeBridgeReady: GetModuleHandle("ScriptHookV.dll") != IntPtr.Zero,
+            providerConnected: true,
+            // The transition may yield to GBAY only after both the gameplay
+            // assembly and its typed default-menu extension are registered.
+            // Merely observing ALLIN1.dll is not presentation readiness.
+            allIn1Loaded: FindManagedAssembly("ALLIN1") != null &&
+                ReactorHostApi.DescribeExtension("allin1.gbay") != null,
+            defaultMenuRequested: PreloadHandoff.IsDefaultMenuIntentActive(
+                Process.GetCurrentProcess().Id));
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
         private static extern IntPtr GetModuleHandle(string moduleName);
 
@@ -774,6 +909,39 @@ namespace RageWebUI.Script.Api
             var message = RequestParameters.RequiredString(parameters, "message", 180);
             Notification.Show(message);
             return new JObject { ["shown"] = true };
+        }
+
+        private static JToken PlayMenuCue(JObject parameters)
+        {
+            var cue = RequestParameters.RequiredString(parameters, "cue", 16).ToLowerInvariant();
+            string sound;
+            switch (cue)
+            {
+                case "navigate":
+                    sound = "NAV_UP_DOWN";
+                    break;
+                case "select":
+                    sound = "SELECT";
+                    break;
+                case "back":
+                    sound = "BACK";
+                    break;
+                case "error":
+                    sound = "ERROR";
+                    break;
+                default:
+                    throw new ApiException(
+                        "invalid_params",
+                        "'cue' must be 'navigate', 'select', 'back', or 'error'.");
+            }
+
+            Function.Call(
+                Hash.PLAY_SOUND_FRONTEND,
+                -1,
+                sound,
+                "HUD_FRONTEND_DEFAULT_SOUNDSET",
+                true);
+            return new JObject { ["played"] = true, ["cue"] = cue };
         }
 
         private static JToken HealPlayer()

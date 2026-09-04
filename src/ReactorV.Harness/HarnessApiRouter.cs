@@ -81,20 +81,74 @@ namespace RageWebUI.Harness
                     case "runtime.describe":
                         result = RuntimeDescription();
                         break;
+                    case StartupStatusContract.Method:
+                        if (request.Parameters.Count != 0)
+                            throw new InvalidOperationException(
+                                "startup.getStatus does not accept parameters.");
+                        result = StartupStatusContract.CreateSnapshot(
+                            reactorReady: true,
+                            nativeBridgeReady: true,
+                            providerConnected: true,
+                            allIn1Loaded: true);
+                        break;
                     case "overlay.close":
                         _setVisible(false);
                         result = new JObject { ["visible"] = false };
+                        break;
+                    case "overlay.presentationReady":
+                        var presentationId = RequireString(request.Parameters, "presentationId");
+                        result = new JObject
+                        {
+                            ["presentationId"] = presentationId,
+                            ["accepted"] = true,
+                        };
                         break;
                     case "overlay.setVisibility":
                         var visibility = RequireString(request.Parameters, "visibility");
                         var visible = visibility == "toggle" ? !_isVisible() : visibility == "visible";
                         if (visibility != "toggle" && visibility != "visible" && visibility != "hidden")
                             throw new InvalidOperationException("Invalid visibility.");
+                        if (!OverlayApiStatePolicy.CanExposeVisibleSurface(visible, _inputMode))
+                            throw new InvalidOperationException(
+                                "A visible overlay cannot use game input mode.");
                         _setVisible(visible);
                         result = OverlayState(visible);
                         break;
+                    case "overlay.setState":
+                        var stateVisibility = RequireString(request.Parameters, "visibility");
+                        var stateInputMode = RequireInputMode(request.Parameters, "inputMode");
+                        var stateVisible = stateVisibility == "toggle"
+                            ? !_isVisible()
+                            : stateVisibility == "visible";
+                        if (stateVisibility != "toggle" &&
+                            stateVisibility != "visible" &&
+                            stateVisibility != "hidden")
+                            throw new InvalidOperationException("Invalid visibility.");
+                        if (!OverlayApiStatePolicy.CanExposeVisibleSurface(
+                                stateVisible,
+                                stateInputMode))
+                            throw new InvalidOperationException(
+                                "A visible overlay cannot use game input mode.");
+                        if (stateVisible)
+                        {
+                            _inputMode = stateInputMode;
+                            _setVisible(true);
+                        }
+                        else
+                        {
+                            _setVisible(false);
+                            _inputMode = stateInputMode;
+                        }
+                        result = OverlayState(stateVisible);
+                        break;
                     case "overlay.setInputMode":
-                        _inputMode = RequireString(request.Parameters, "mode");
+                        var requestedInputMode = RequireInputMode(request.Parameters, "mode");
+                        if (!OverlayApiStatePolicy.CanExposeVisibleSurface(
+                                _isVisible(),
+                                requestedInputMode))
+                            throw new InvalidOperationException(
+                                "Game input mode cannot be applied while visible.");
+                        _inputMode = requestedInputMode;
                         result = OverlayState(_isVisible());
                         break;
                     case "extensions.list":
@@ -159,6 +213,12 @@ namespace RageWebUI.Harness
                         break;
                     case "ui.notify":
                         result = new JObject { ["shown"] = true };
+                        break;
+                    case "ui.playMenuCue":
+                        var cue = RequireString(request.Parameters, "cue");
+                        if (cue != "navigate" && cue != "select" && cue != "back" && cue != "error")
+                            throw new InvalidOperationException("Unknown menu audio cue.");
+                        result = new JObject { ["played"] = true, ["cue"] = cue };
                         break;
                     case "player.heal":
                         ((JObject)_state["player"]!)["health"] = 200;
@@ -233,6 +293,14 @@ namespace RageWebUI.Harness
             ["inputMode"] = _inputMode,
         };
 
+        private static string RequireInputMode(JObject parameters, string name)
+        {
+            var mode = RequireString(parameters, name).ToLowerInvariant();
+            if (!OverlayApiStatePolicy.IsSupportedInputMode(mode))
+                throw new InvalidOperationException("Invalid overlay input mode.");
+            return mode;
+        }
+
         private static JObject RuntimeStatus() => new JObject
         {
             ["apiVersion"] = BridgeProtocol.CurrentProtocolVersion,
@@ -245,8 +313,10 @@ namespace RageWebUI.Harness
             ["extensionApiVersion"] = ReactorApi.ExtensionApiVersion,
             ["capabilities"] = new JArray(
                 "runtime.discovery", "overlay.visibility", "overlay.input",
+                "overlay.state",
                 "extension.discovery", "extension.actions", "menu.discovery",
-                "menu.actions", "events.subscriptions", "events.lifecycle", "input.semantic"),
+                "menu.actions", "events.subscriptions", "events.lifecycle", "input.semantic",
+                "menu.audio", "startup.status"),
             ["dependencies"] = new JArray
             {
                 Status("scripthookv", "Script Hook V"),
@@ -265,7 +335,10 @@ namespace RageWebUI.Harness
             ["methods"] = new JArray(
                 Method("runtime.handshake", "runtime.discovery"),
                 Method("runtime.describe", "runtime.discovery"),
+                Method(StartupStatusContract.Method, "startup.status"),
                 Method("overlay.setVisibility", "overlay.visibility"),
+                Method("overlay.setState", "overlay.state"),
+                Method("overlay.presentationReady", "menu.presentation"),
                 Method("overlay.setInputMode", "overlay.input"),
                 Method("extensions.list", "extension.discovery"),
                 Method("extensions.get", "extension.discovery"),
@@ -273,10 +346,12 @@ namespace RageWebUI.Harness
                 Method("menu.list", "menu.discovery"),
                 Method("menu.get", "menu.discovery"),
                 Method("menu.invoke", "menu.actions", "optional"),
+                Method("ui.playMenuCue", "menu.audio"),
                 Method("events.subscribe", "events.subscriptions"),
                 Method("events.unsubscribe", "events.subscriptions")),
             ["events"] = new JArray(
                 Event("runtime.lifecycle", "events.lifecycle", true),
+                Event(StartupStatusContract.EventName, "startup.status", true),
                 Event("input.action", "input.semantic", false),
                 Event("game.state", "game.state", true)),
             ["limits"] = new JObject

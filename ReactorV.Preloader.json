@@ -1,4 +1,6 @@
 {
   "processWaitTimeoutSeconds": 180,
-  "maximumLifetimeSeconds": 300
+  "maximumLifetimeSeconds": 300,
+  "externalGpuBrowserShadow": true,
+  "externalGpuFrameRate": 30
 }

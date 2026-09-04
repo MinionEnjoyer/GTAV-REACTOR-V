@@ -13,7 +13,15 @@ namespace RageWebUI.Runtime
     /// Renderer entry point loaded explicitly by the SHVDN bootstrap. This
     /// assembly and its browser dependencies live outside the scripts tree.
     /// </summary>
-    public sealed class OverlayRuntime : IOverlayRuntime
+    public sealed class OverlayRuntime :
+        IOverlayRuntime,
+        IProviderPresentationCommitRuntime,
+        IProviderInputIntentRuntime,
+        IContentGenerationRuntime,
+        IBootstrapSurfaceRuntime,
+        IAuthoritativeHostSurfaceRuntime,
+        IReasonedVisibilityRuntime,
+        IInteractionForegroundRuntime
     {
         private readonly string _renderer;
         private readonly IntPtr _gtaWindow;
@@ -58,6 +66,94 @@ namespace RageWebUI.Runtime
 
         public string RendererName => _active?.RendererName ?? "Renderer pending";
 
+        public string CurrentHostSurface =>
+            (_active as IHostSurfaceRuntime)?.CurrentHostSurface ?? HostSurfaceMode.None;
+
+        public bool IsTrustedProviderForeground =>
+            (_active as IInteractionForegroundRuntime)?.IsTrustedProviderForeground == true;
+
+        public bool IsProviderPresentationCommitted(string presentationId)
+        {
+            if (_active is IProviderPresentationCommitRuntime commitRuntime)
+                return commitRuntime.IsProviderPresentationCommitted(presentationId);
+
+            // The injected renderer has no process boundary or separate
+            // composition-host acknowledgement. Its visible state is the
+            // closest equivalent commit boundary; WebView2 paths must always
+            // use the exact-ID contract above.
+            return _active is DirectXRuntime &&
+                _active.IsVisible &&
+                ProviderPresentationCommitContract.IsValidPresentationId(
+                    presentationId);
+        }
+
+        public bool IsProviderPresentationAuthorizedByUserIntent(
+            string presentationId) =>
+            _active is IProviderInputIntentRuntime intentRuntime &&
+            intentRuntime.IsProviderPresentationAuthorizedByUserIntent(
+                presentationId);
+
+        public bool ArmProviderInputIntent(ProviderInputIntentToken token) =>
+            _active is IProviderInputIntentRuntime intentRuntime &&
+            intentRuntime.ArmProviderInputIntent(token);
+
+        public bool BindProviderInputIntent(
+            int processId,
+            long epoch,
+            string presentationId) =>
+            _active is IProviderInputIntentRuntime intentRuntime &&
+            intentRuntime.BindProviderInputIntent(
+                processId,
+                epoch,
+                presentationId);
+
+        public void CancelProviderInputIntent(int processId, long epoch)
+        {
+            if (_active is IProviderInputIntentRuntime intentRuntime)
+                intentRuntime.CancelProviderInputIntent(processId, epoch);
+        }
+
+        public bool BootstrapSurfaceRetirementPending =>
+            (_active as IBootstrapSurfaceRuntime)?.BootstrapSurfaceRetirementPending == true;
+
+        public bool HasAuthoritativeHostSurfaceBoundary =>
+            (_active as IAuthoritativeHostSurfaceRuntime)?
+                .HasAuthoritativeHostSurfaceBoundary == true;
+
+        public void RetireBootstrapSurface(bool hide)
+        {
+            if (_active is IBootstrapSurfaceRuntime bootstrapRuntime)
+            {
+                bootstrapRuntime.RetireBootstrapSurface(hide);
+                return;
+            }
+
+            // Ordinary in-process renderers have no external logical state,
+            // but still clear the browser mode if they ever receive a
+            // bootstrap surface during a recovery path.
+            _active?.PostEvent(
+                "host.surface",
+                new JObject { ["mode"] = HostSurfaceMode.None });
+            if (hide) _active?.SetVisible(false);
+        }
+
+        public bool TryGetReadyContentGeneration(out int generation)
+        {
+            if (_active is IContentGenerationRuntime generationRuntime)
+                return generationRuntime.TryGetReadyContentGeneration(out generation);
+            generation = 0;
+            return false;
+        }
+
+        public RuntimeReadyHandoffState AdvanceRuntimeReadyHandoff(
+            int expectedContentGeneration)
+        {
+            if (_active is IContentGenerationRuntime generationRuntime)
+                return generationRuntime.AdvanceRuntimeReadyHandoff(
+                    expectedContentGeneration);
+            return RuntimeReadyHandoffState.Unavailable;
+        }
+
         public bool Start()
         {
             if (_active != null)
@@ -70,6 +166,28 @@ namespace RageWebUI.Runtime
                 _localDataDirectory,
                 "overlay_start_begin",
                 $"renderer={_renderer} runtime={_runtimeDirectory} ui={_uiDirectory}");
+            if (_renderer != "directx")
+            {
+                var bootstrap = new BootstrapOverlayRuntime(
+                    Process.GetCurrentProcess().Id,
+                    _localDataDirectory,
+                    _broker,
+                    _startVisible);
+                if (bootstrap.Start())
+                {
+                    _active = bootstrap;
+                    RuntimeTrace.Write(
+                        _localDataDirectory,
+                        "overlay_start_ready",
+                        $"renderer={bootstrap.RendererName} duration_ms={startTimer.Elapsed.TotalMilliseconds:F3}");
+                    return true;
+                }
+                bootstrap.Dispose();
+                RuntimeTrace.Write(
+                    _localDataDirectory,
+                    "bootstrap_host_fallback",
+                    "reason=host_not_ready_or_attach_failed");
+            }
             var directXHostSupported = AppDomain.CurrentDomain.IsDefaultAppDomain();
             if (_renderer != "windowed" && !directXHostSupported)
             {
@@ -157,11 +275,20 @@ namespace RageWebUI.Runtime
 
         public void SetVisible(bool visible)
         {
+            SetVisible(visible, HostVisibilityReason.Explicit);
+        }
+
+        public void SetVisible(bool visible, HostVisibilityReason reason)
+        {
             RuntimeTrace.Write(
                 _localDataDirectory,
                 "visibility_requested",
-                $"visible={visible} renderer={RendererName}");
-            RequireActive().SetVisible(visible);
+                $"visible={visible} reason={reason} renderer={RendererName}");
+            var active = RequireActive();
+            if (active is IReasonedVisibilityRuntime reasonedVisibility)
+                reasonedVisibility.SetVisible(visible, reason);
+            else
+                active.SetVisible(visible);
         }
 
         public void PumpInput() => _active?.PumpInput();

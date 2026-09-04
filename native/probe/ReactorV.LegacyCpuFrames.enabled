@@ -1,0 +1,1 @@
+Legacy-only diagnostic: authenticated CPU browser frames, 15 fps maximum, 32 MiB maximum per frame. Supersedes the texture-pattern probe. Requires ReactorV.LegacyLiveTest.json. Remove this marker to disable.

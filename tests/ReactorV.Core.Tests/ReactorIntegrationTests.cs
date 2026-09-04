@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -111,6 +112,39 @@ public sealed class ReactorIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void ManagedPhysicalF9HasExactlyOneRegisteredExtensionOwner()
+    {
+        using var first = ReactorApi.RegisterExtension(
+            new ReactorExtensionDescriptor(
+                "first.f9.owner",
+                "First",
+                "1.0.0",
+                capabilities: new[]
+                {
+                    ReactorExtensionCapabilities.DefaultF9MenuOwner,
+                }),
+            builder => builder.AddAction(
+                ReadAction(),
+                (_, __) => ReactorActionResult.Success()));
+
+        Assert.True(ReactorHostApi.HasExtensionCapability(
+            ReactorExtensionCapabilities.DefaultF9MenuOwner));
+        Assert.Throws<InvalidOperationException>(() =>
+            ReactorApi.RegisterExtension(
+                new ReactorExtensionDescriptor(
+                    "second.f9.owner",
+                    "Second",
+                    "1.0.0",
+                    capabilities: new[]
+                    {
+                        ReactorExtensionCapabilities.DefaultF9MenuOwner,
+                    }),
+                builder => builder.AddAction(
+                    ReadAction(),
+                    (_, __) => ReactorActionResult.Success())));
+    }
+
+    [Fact]
     public void Descriptors_and_builder_reject_invalid_or_ambiguous_contracts()
     {
         Assert.Throws<ArgumentException>(() => new ReactorExtensionDescriptor("Bad Id", "Bad", "1"));
@@ -138,6 +172,35 @@ public sealed class ReactorIntegrationTests : IDisposable
             Descriptor(),
             builder => builder.AddMenu(new ReactorMenuDescriptor(
                 "main", "Main", new[] { new ReactorActionNode("run", "Run", "missing") }))));
+    }
+
+    [Fact]
+    public void Api_v1_menu_constructor_and_handle_contracts_remain_binary_compatible()
+    {
+        Assert.NotNull(typeof(ReactorActionNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorToggleNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(bool), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorChoiceNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(IEnumerable<ReactorChoiceOption>), typeof(string), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorRangeNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(double), typeof(double), typeof(double), typeof(double), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorTextNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(int), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorSearchNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(int), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorKeybindNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.NotNull(typeof(ReactorPaginationNode).GetConstructor(new[]
+            { typeof(string), typeof(string), typeof(string), typeof(int), typeof(int), typeof(string), typeof(bool), typeof(bool) }));
+        Assert.DoesNotContain(
+            typeof(IReactorExtensionHandle).GetMethods(),
+            method => method.Name.Contains("Present", StringComparison.Ordinal) ||
+                method.Name.Contains("Dismiss", StringComparison.Ordinal));
+
+        using var handle = RegisterReadExtension();
+        Assert.IsAssignableFrom<IReactorMenuPresentationHandle>(handle);
+        Assert.IsAssignableFrom<IReactorMenuPresentationStateHandle>(handle);
     }
 
     [Fact]
@@ -712,6 +775,500 @@ public sealed class ReactorIntegrationTests : IDisposable
         handle.Dispose();
     }
 
+    [Fact]
+    public void Reset_delivers_unloading_once_with_the_shutdown_payload()
+    {
+        var lifecycle = new RecordingLifecycle();
+        var handle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder.UseLifecycle(lifecycle));
+        var payload = new JObject { ["gameTime"] = 417 };
+
+        ReactorHostApi.Reset(payload);
+        payload["gameTime"] = 999;
+
+        var unloading = lifecycle.Entries
+            .Where(value => value.Stage == ReactorLifecycleStage.Unloading)
+            .ToArray();
+        Assert.Single(unloading);
+        Assert.Equal(417, unloading[0].Payload!.Value<int>("gameTime"));
+        Assert.False(handle.TryPublishEvent("changed", new JObject()));
+        handle.Dispose();
+    }
+
+    [Fact]
+    public void BeginShutdown_does_not_wait_for_extension_cleanup()
+    {
+        using var started = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        using var completed = new ManualResetEventSlim(false);
+        var lifecycle = new BlockingUnloadingLifecycle(started, release, completed);
+        var handle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder.UseLifecycle(lifecycle));
+
+        var elapsed = Stopwatch.StartNew();
+        ReactorHostApi.BeginShutdown(new JObject { ["reason"] = "game-exit" });
+        elapsed.Stop();
+
+        Assert.True(elapsed.ElapsedMilliseconds < 250, elapsed.Elapsed.ToString());
+        Assert.True(started.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, lifecycle.UnloadingCount);
+        release.Set();
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, lifecycle.UnloadingCount);
+        handle.Dispose();
+    }
+
+    [Fact]
+    public void Menu_bound_parameters_are_immutable_merged_and_cannot_be_overridden()
+    {
+        JObject? received = null;
+        var bound = new JObject { ["listingid"] = "vehicle-adder" };
+        using var handle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder
+                .AddAction(
+                    new ReactorActionDescriptor(
+                        "purchase",
+                        "Purchase",
+                        ReactorActionRisk.Read,
+                        new[]
+                        {
+                            new ReactorParameterDescriptor("listingid", ReactorValueType.String, required: true),
+                            new ReactorParameterDescriptor("quantity", ReactorValueType.Integer, minimum: 1),
+                        }),
+                    (_, parameters) =>
+                    {
+                        received = (JObject)parameters.DeepClone();
+                        return ReactorActionResult.Success();
+                    })
+                .AddMenu(new ReactorMenuDescriptor(
+                    "main",
+                    "Main",
+                    new[]
+                    {
+                        new ReactorActionNode(
+                            "buy",
+                            "Buy",
+                            "purchase",
+                            "",
+                            true,
+                            true,
+                            boundParameters: bound),
+                    })));
+
+        bound["listingid"] = "mutated-after-registration";
+        var descriptorNode = (JObject)ReactorHostApi.DescribeMenus(
+            "example.extension", "main")[0]!["nodes"]![0]!;
+        Assert.Equal(
+            "vehicle-adder",
+            descriptorNode["boundParameters"]!.Value<string>("listingid"));
+
+        var result = ReactorHostApi.InvokeMenu(
+            "example.extension",
+            "main",
+            "buy",
+            "activate",
+            new JObject { ["quantity"] = 2 });
+        Assert.True(result.Succeeded);
+        Assert.NotNull(received);
+        Assert.Equal("vehicle-adder", received!.Value<string>("listingid"));
+        Assert.Equal(2, received.Value<int>("quantity"));
+
+        received = null;
+        var overrideResult = ReactorHostApi.InvokeMenu(
+            "example.extension",
+            "main",
+            "buy",
+            "activate",
+            new JObject { ["LISTINGID"] = "browser-choice" });
+        Assert.Equal("bound_parameter_override", overrideResult.ErrorCode);
+        Assert.Null(received);
+    }
+
+    [Fact]
+    public void Bound_parameter_contracts_are_validated_on_registration_and_update()
+    {
+        var action = new ReactorActionDescriptor(
+            "purchase",
+            "Purchase",
+            ReactorActionRisk.Read,
+            new[] { new ReactorParameterDescriptor("listingid", ReactorValueType.String, required: true) });
+
+        Assert.Throws<InvalidOperationException>(() => ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder
+                .AddAction(action, (_, __) => ReactorActionResult.Success())
+                .AddMenu(new ReactorMenuDescriptor(
+                    "main",
+                    "Main",
+                    new[]
+                    {
+                        new ReactorActionNode(
+                            "buy",
+                            "Buy",
+                            "purchase",
+                            "",
+                            true,
+                            true,
+                            boundParameters: new JObject { ["listingid"] = 42 }),
+                    }))));
+
+        using var handle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder
+                .AddAction(action, (_, __) => ReactorActionResult.Success())
+                .AddMenu(new ReactorMenuDescriptor(
+                    "main",
+                    "Main",
+                    new[]
+                    {
+                        new ReactorActionNode(
+                            "buy",
+                            "Buy",
+                            "purchase",
+                            "",
+                            true,
+                            true,
+                            boundParameters: new JObject { ["listingid"] = "valid" }),
+                    })));
+
+        Assert.Throws<InvalidOperationException>(() => handle.UpdateMenu(new ReactorMenuDescriptor(
+            "main",
+            "Main",
+            new[]
+            {
+                new ReactorActionNode(
+                    "buy",
+                    "Buy",
+                    "purchase",
+                    "",
+                    true,
+                    true,
+                    boundParameters: new JObject { ["unknown"] = true }),
+            })));
+    }
+
+    [Fact]
+    public void Menu_presentation_requests_are_owned_bounded_and_detached()
+    {
+        var extensionHandle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Main")));
+        var handle = (IReactorMenuPresentationHandle)extensionHandle;
+        var context = new JObject { ["source"] = "gbay" };
+
+        Assert.False(handle.TryPresentMenu("main", context));
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+        Assert.False(handle.TryPresentMenu("missing", context));
+        Assert.True(handle.TryPresentMenu("main", context));
+        context["source"] = "mutated";
+
+        var presentation = Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<JObject>();
+        Assert.NotNull(presentation);
+        Assert.Equal("example.extension", presentation!.Value<string>("extensionId"));
+        Assert.Equal("main", presentation.Value<string>("menuId"));
+        Assert.Matches("^[0-9a-f]{32}$", presentation.Value<string>("presentationId")!);
+        Assert.Equal("interactive-menu", presentation.Value<string>("inputMode"));
+        Assert.Equal("gbay", presentation["context"]!.Value<string>("source"));
+
+        for (var index = 0; index < ReactorRegistry.MaximumPendingMenuPresentations + 10; index++)
+        {
+            Assert.True(handle.TryPresentMenu(
+                "main",
+                new JObject { ["sequence"] = index }));
+        }
+        var coalesced = Assert.Single(
+            ReactorHostApi.DrainMenuPresentations()).Value<JObject>();
+        Assert.Equal(
+            ReactorRegistry.MaximumPendingMenuPresentations + 9,
+            coalesced!["context"]!.Value<int>("sequence"));
+
+        Assert.True(extensionHandle.RemoveMenu("main"));
+        Assert.Empty(ReactorHostApi.DrainMenuPresentations());
+        extensionHandle.Dispose();
+        Assert.False(handle.TryPresentMenu("main"));
+    }
+
+    [Fact]
+    public void Presentation_host_unavailability_fails_closed_and_drops_stale_requests()
+    {
+        using var extensionHandle = ReactorApi.RegisterExtension(
+            Descriptor(),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Main")));
+        var handle = (IReactorMenuPresentationHandle)extensionHandle;
+
+        Assert.False(handle.TryPresentMenu("main"));
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+        Assert.True(handle.TryPresentMenu("main"));
+        ReactorHostApi.SetMenuPresentationHostAvailable(false);
+
+        Assert.Empty(ReactorHostApi.DrainMenuPresentations());
+        Assert.False(handle.TryPresentMenu("main"));
+    }
+
+    [Fact]
+    public void Active_menu_query_and_dismissal_follow_authoritative_host_lifecycle()
+    {
+        using var firstHandle = ReactorApi.RegisterExtension(
+            Descriptor("first.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("First")));
+        using var secondHandle = ReactorApi.RegisterExtension(
+            Descriptor("second.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Second")));
+        var first = (IReactorMenuPresentationHandle)firstHandle;
+        var second = (IReactorMenuPresentationHandle)secondHandle;
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+
+        Assert.True(first.TryPresentMenu("main"));
+        Assert.True(second.TryPresentMenu("main"));
+        var queued = new[]
+        {
+            Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!,
+            Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!,
+        };
+        Assert.Empty(ReactorHostApi.DrainMenuPresentations());
+        // Drained generations remain authoritative while the script host is
+        // dispatching them. F9 can therefore close this handoff state without
+        // queuing another open request.
+        Assert.True(first.IsMenuPresented("main"));
+        Assert.True(second.IsMenuPresented("main"));
+
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            "first.extension",
+            "main",
+            queued[0].Value<string>("presentationId")!,
+            out var firstSuperseded));
+        Assert.Null(firstSuperseded);
+        Assert.True(first.IsMenuPresented("main"));
+        Assert.True(second.IsMenuPresented("main"));
+
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            "second.extension",
+            "main",
+            queued[1].Value<string>("presentationId")!,
+            out var secondSuperseded));
+        Assert.Equal(
+            queued[0].Value<string>("presentationId"),
+            secondSuperseded!.Value<string>("presentationId"));
+        Assert.False(first.IsMenuPresented("main"));
+        Assert.True(second.IsMenuPresented("main"));
+
+        Assert.True(second.TryDismissMenu("main"));
+        Assert.True(second.IsMenuPresented("main"));
+        var dismissal = Assert.Single(ReactorHostApi.DrainMenuDismissals()).Value<JObject>();
+        Assert.Equal("second.extension", dismissal!.Value<string>("extensionId"));
+        Assert.Equal(queued[1].Value<string>("presentationId"), dismissal.Value<string>("presentationId"));
+        Assert.True(second.TryDismissMenu("main"));
+        Assert.Empty(ReactorHostApi.DrainMenuDismissals());
+        Assert.False(first.TryPresentMenu("main"));
+
+        // A superseded generation cannot be resurrected. A fresh request gets
+        // a fresh authoritative presentation id.
+        Assert.False(ReactorHostApi.MarkMenuPresentationActive(
+            "first.extension",
+            "main",
+            queued[0].Value<string>("presentationId")!,
+            out var finalSuperseded));
+        Assert.Null(finalSuperseded);
+        Assert.NotNull(ReactorHostApi.AcknowledgeMenuPresentationHidden(
+            queued[1].Value<string>("presentationId")!));
+        Assert.False(second.IsMenuPresented("main"));
+        Assert.True(first.TryPresentMenu("main"));
+        var replacement = Assert.Single(
+            ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!;
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            "first.extension",
+            "main",
+            replacement.Value<string>("presentationId")!,
+            out finalSuperseded));
+        Assert.Null(finalSuperseded);
+        var hidden = ReactorHostApi.TakeActiveMenuPresentation();
+        Assert.Equal("first.extension", hidden!.Value<string>("extensionId"));
+        Assert.Equal(
+            replacement.Value<string>("presentationId"),
+            hidden.Value<string>("presentationId"));
+        Assert.False(first.IsMenuPresented("main"));
+    }
+
+    [Fact]
+    public void Menu_readiness_tracks_only_the_exact_active_presentation_generation()
+    {
+        using var extensionHandle = ReactorApi.RegisterExtension(
+            Descriptor("ready.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Ready")));
+        var presentation = (IReactorMenuPresentationHandle)extensionHandle;
+        var state = (IReactorMenuPresentationStateHandle)extensionHandle;
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+
+        Assert.False(state.IsMenuPresentationReady("main"));
+        Assert.True(presentation.TryPresentMenu("main"));
+        Assert.True(presentation.IsMenuPresented("main"));
+        Assert.False(state.IsMenuPresentationReady("main"));
+
+        var dispatching = Assert.Single(
+            ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!;
+        var presentationId = dispatching.Value<string>("presentationId")!;
+        Assert.False(state.IsMenuPresentationReady("main"));
+        Assert.False(ReactorHostApi.MarkMenuPresentationReady("stale-presentation-id"));
+        Assert.False(state.IsMenuPresentationReady("main"));
+
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            "ready.extension",
+            "main",
+            presentationId,
+            out var superseded));
+        Assert.Null(superseded);
+        Assert.False(state.IsMenuPresentationReady("main"));
+        Assert.False(ReactorHostApi.MarkMenuPresentationReady("stale-presentation-id"));
+        Assert.False(state.IsMenuPresentationReady("main"));
+
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(presentationId));
+        Assert.True(state.IsMenuPresentationReady("main"));
+
+        Assert.True(presentation.TryDismissMenu("main"));
+        Assert.True(presentation.IsMenuPresented("main"));
+        Assert.False(state.IsMenuPresentationReady("main"));
+        var dismissal = Assert.Single(
+            ReactorHostApi.DrainMenuDismissals()).Value<JObject>()!;
+        Assert.NotNull(ReactorHostApi.AcknowledgeMenuPresentationHidden(
+            dismissal.Value<string>("presentationId")!));
+        Assert.False(presentation.IsMenuPresented("main"));
+    }
+
+    [Fact]
+    public void Menu_readiness_clears_on_supersede_take_host_loss_and_reset()
+    {
+        using var firstHandle = ReactorApi.RegisterExtension(
+            Descriptor("ready.first"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("First")));
+        using var secondHandle = ReactorApi.RegisterExtension(
+            Descriptor("ready.second"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Second")));
+        var firstPresentation = (IReactorMenuPresentationHandle)firstHandle;
+        var firstState = (IReactorMenuPresentationStateHandle)firstHandle;
+        var secondPresentation = (IReactorMenuPresentationHandle)secondHandle;
+        var secondState = (IReactorMenuPresentationStateHandle)secondHandle;
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+
+        var firstId = PresentAndActivate(firstPresentation, "ready.first");
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(firstId));
+        Assert.True(firstState.IsMenuPresentationReady("main"));
+
+        Assert.True(secondPresentation.TryPresentMenu("main"));
+        var secondDispatch = Assert.Single(
+            ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!;
+        var secondId = secondDispatch.Value<string>("presentationId")!;
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            "ready.second",
+            "main",
+            secondId,
+            out var superseded));
+        Assert.Equal(firstId, superseded!.Value<string>("presentationId"));
+        Assert.False(firstState.IsMenuPresentationReady("main"));
+        Assert.False(secondState.IsMenuPresentationReady("main"));
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(secondId));
+        Assert.True(secondState.IsMenuPresentationReady("main"));
+
+        Assert.NotNull(ReactorHostApi.TakeActiveMenuPresentation());
+        Assert.False(secondState.IsMenuPresentationReady("main"));
+
+        var replacementId = PresentAndActivate(secondPresentation, "ready.second");
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(replacementId));
+        ReactorHostApi.SetMenuPresentationHostAvailable(false);
+        Assert.False(secondState.IsMenuPresentationReady("main"));
+
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+        var resetId = PresentAndActivate(secondPresentation, "ready.second");
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(resetId));
+        ReactorHostApi.Reset();
+        Assert.False(secondState.IsMenuPresentationReady("main"));
+    }
+
+    [Fact]
+    public void Pending_or_dispatching_menu_can_be_closed_without_a_late_reopen()
+    {
+        using var extensionHandle = ReactorApi.RegisterExtension(
+            Descriptor("toggle.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Toggle")));
+        var handle = (IReactorMenuPresentationHandle)extensionHandle;
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+
+        Assert.True(handle.TryPresentMenu("main"));
+        Assert.True(handle.IsMenuPresented("main"));
+        Assert.True(handle.TryDismissMenu("main"));
+        Assert.False(handle.IsMenuPresented("main"));
+        Assert.Empty(ReactorHostApi.DrainMenuPresentations());
+        Assert.Empty(ReactorHostApi.DrainMenuDismissals());
+
+        Assert.True(handle.TryPresentMenu("main"));
+        var dispatching = Assert.Single(
+            ReactorHostApi.DrainMenuPresentations()).Value<JObject>()!;
+        Assert.True(handle.IsMenuPresented("main"));
+        Assert.True(handle.TryDismissMenu("main"));
+        Assert.False(handle.IsMenuPresented("main"));
+        Assert.False(ReactorHostApi.MarkMenuPresentationActive(
+            "toggle.extension",
+            "main",
+            dispatching.Value<string>("presentationId")!,
+            out var superseded));
+        Assert.Null(superseded);
+        Assert.Empty(ReactorHostApi.DrainMenuDismissals());
+    }
+
+    [Fact]
+    public void Removing_an_active_menu_or_extension_queues_authoritative_dismissal()
+    {
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+        var menuHandle = ReactorApi.RegisterExtension(
+            Descriptor("menu.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Menu")));
+        var menuPresentation = PresentAndActivate(
+            (IReactorMenuPresentationHandle)menuHandle,
+            "menu.extension");
+
+        Assert.True(menuHandle.RemoveMenu("main"));
+        var menuDismissal = Assert.Single(ReactorHostApi.DrainMenuDismissals()).Value<JObject>();
+        Assert.Equal(menuPresentation, menuDismissal!.Value<string>("presentationId"));
+        Assert.NotNull(ReactorHostApi.AcknowledgeMenuPresentationHidden(
+            menuPresentation));
+        menuHandle.Dispose();
+
+        var extensionHandle = ReactorApi.RegisterExtension(
+            Descriptor("unload.extension"),
+            builder => builder
+                .AddAction(ReadAction(), (_, __) => ReactorActionResult.Success())
+                .AddMenu(Menu("Menu")));
+        var extensionPresentation = PresentAndActivate(
+            (IReactorMenuPresentationHandle)extensionHandle,
+            "unload.extension");
+
+        extensionHandle.Dispose();
+        var extensionDismissal = Assert.Single(ReactorHostApi.DrainMenuDismissals()).Value<JObject>();
+        Assert.Equal(extensionPresentation, extensionDismissal!.Value<string>("presentationId"));
+        Assert.NotNull(ReactorHostApi.AcknowledgeMenuPresentationHidden(
+            extensionPresentation));
+    }
+
     private static ReactorExtensionDescriptor Descriptor(string id = "example.extension") =>
         new ReactorExtensionDescriptor(id, "Example", "1.0.0", capabilities: new[] { "menu.routes" });
 
@@ -727,6 +1284,22 @@ public sealed class ReactorIntegrationTests : IDisposable
 
     private static ReactorMenuDescriptor Menu(string label) => new ReactorMenuDescriptor(
         "main", label, new[] { new ReactorActionNode("run", "Run", "read") });
+
+    private static string PresentAndActivate(
+        IReactorMenuPresentationHandle handle,
+        string extensionId)
+    {
+        Assert.True(handle.TryPresentMenu("main"));
+        var presentation = Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<JObject>();
+        var presentationId = presentation!.Value<string>("presentationId")!;
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive(
+            extensionId,
+            "main",
+            presentationId,
+            out var superseded));
+        Assert.Null(superseded);
+        return presentationId;
+    }
 
     private static IEnumerable<JToken> Descendants(JToken root)
     {
@@ -745,6 +1318,35 @@ public sealed class ReactorIntegrationTests : IDisposable
         {
             Entries.Add(context);
             if (context.Stage == _throwOn) throw new InvalidOperationException("Fixture failure");
+        }
+    }
+
+    private sealed class BlockingUnloadingLifecycle : IReactorExtensionLifecycle
+    {
+        private readonly ManualResetEventSlim _started;
+        private readonly ManualResetEventSlim _release;
+        private readonly ManualResetEventSlim _completed;
+        private int _unloadingCount;
+
+        public BlockingUnloadingLifecycle(
+            ManualResetEventSlim started,
+            ManualResetEventSlim release,
+            ManualResetEventSlim completed)
+        {
+            _started = started;
+            _release = release;
+            _completed = completed;
+        }
+
+        public int UnloadingCount => Volatile.Read(ref _unloadingCount);
+
+        public void OnLifecycle(ReactorLifecycleContext context)
+        {
+            if (context.Stage != ReactorLifecycleStage.Unloading) return;
+            Interlocked.Increment(ref _unloadingCount);
+            _started.Set();
+            _release.Wait();
+            _completed.Set();
         }
     }
 }

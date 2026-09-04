@@ -5,6 +5,7 @@ import type {
   OverlayState,
   RuntimeDescription,
   RuntimeHandshake,
+  StartupStatus,
   WebViewTransport,
 } from './types'
 
@@ -61,8 +62,8 @@ const runtime: RuntimeHandshake = {
   edition: 'Enhanced',
   capabilities: [
     'events.lifecycle', 'events.subscriptions', 'extension.actions', 'extension.discovery',
-    'extension.events', 'game.actions', 'game.state', 'input.semantic', 'menu.actions',
-    'menu.discovery', 'overlay.input', 'overlay.visibility', 'runtime.discovery',
+    'extension.events', 'game.actions', 'game.state', 'input.semantic', 'menu.actions', 'menu.audio',
+    'menu.discovery', 'overlay.input', 'overlay.state', 'overlay.visibility', 'runtime.discovery',
   ],
   extensionApiVersion: 1,
   dependencies: [
@@ -75,22 +76,54 @@ const runtime: RuntimeHandshake = {
   ],
 }
 
+const startupStatus: StartupStatus = {
+  schemaVersion: 1,
+  sequence: 3,
+  sessionId: 'browser-demo',
+  phase: 'provider-connected',
+  providerConnected: true,
+  defaultMenuRequested: false,
+  defaultMenuDeadlineUtc: null,
+  components: [
+    { id: 'reactor', label: 'REACTOR V', state: 'ready', detail: 'Browser preview loaded.' },
+    { id: 'scripthook', label: 'ScriptHookV', state: 'ready', detail: 'Preview gameplay bridge.' },
+    { id: 'managed-bridge', label: 'Managed bridge', state: 'ready', detail: 'Preview provider connected.' },
+    { id: 'allin1', label: 'ALLIN1', state: 'ready', detail: 'Preview GBAY provider ready.' },
+  ],
+  console: {
+    maxEntries: 48,
+    dropped: 0,
+    entries: [{
+      sequence: 3,
+      timestampUtc: '2026-08-29T16:00:03Z',
+      source: 'demo',
+      stage: 'provider-connected',
+      message: 'ALLIN1 preview provider connected.',
+    }],
+  },
+}
+
 const runtimeDescription: RuntimeDescription = {
   apiVersion: 2,
   extensionApiVersion: 1,
   sessionId: runtime.sessionId,
   capabilities: runtime.capabilities,
   methods: [
+    { method: 'startup.getStatus' },
     { method: 'runtime.handshake' }, { method: 'runtime.describe' },
+    { method: 'overlay.presentationReady', capability: 'menu.presentation' },
+    { method: 'overlay.setState', capability: 'overlay.state' },
     { method: 'overlay.setVisibility', capability: 'overlay-input' },
     { method: 'overlay.setInputMode', capability: 'overlay-input' },
     { method: 'extensions.list', capability: 'extensions' }, { method: 'extensions.get', capability: 'extensions' },
     { method: 'extensions.invoke', capability: 'extensions', confirmed: true, idempotency: 'optional' },
     { method: 'menu.list', capability: 'menus' }, { method: 'menu.get', capability: 'menus' },
     { method: 'menu.invoke', capability: 'menus', confirmed: true, idempotency: 'optional' },
+    { method: 'ui.playMenuCue', capability: 'menu.audio' },
     { method: 'events.subscribe', capability: 'events' }, { method: 'events.unsubscribe', capability: 'events' },
   ],
   events: [
+    { event: 'startup.status', replay: true },
     { event: 'runtime.lifecycle', replay: true }, { event: 'input.action' },
   ],
   limits: { requestBytes: 65_536, queueDepth: 256, requestsPerFrame: 32, subscriptions: 128 },
@@ -199,14 +232,43 @@ export class DemoTransport implements WebViewTransport {
 
   private handle(method: string, params: Record<string, unknown>): unknown {
     switch (method) {
+      case 'startup.getStatus': return startupStatus
       case 'runtime.handshake': return runtime
       case 'runtime.describe': return runtimeDescription
       case 'overlay.setVisibility':
-        this.overlay.visible = params.visibility === 'toggle' ? !this.overlay.visible : params.visibility === 'visible'
+        {
+          const visible = params.visibility === 'toggle' ? !this.overlay.visible : params.visibility === 'visible'
+          if (visible && this.overlay.inputMode === 'game') {
+            throw new Error('A visible overlay cannot use game input mode. Use overlay.setState.')
+          }
+          this.overlay.visible = visible
+        }
+        return this.overlay
+      case 'overlay.setState':
+        {
+          const visibility = String(params.visibility)
+          const inputMode = String(params.inputMode) as OverlayState['inputMode']
+          const visible = visibility === 'toggle' ? !this.overlay.visible : visibility === 'visible'
+          if (!['hidden', 'visible', 'toggle'].includes(visibility)) throw new Error('Invalid visibility.')
+          if (!['game', 'menu', 'interactive-menu', 'pointer', 'exclusive'].includes(inputMode)) {
+            throw new Error('Invalid input mode.')
+          }
+          if (visible && inputMode === 'game') throw new Error('A visible overlay cannot use game input mode.')
+          this.overlay = { visible, inputMode }
+        }
         return this.overlay
       case 'overlay.setInputMode':
-        this.overlay.inputMode = String(params.mode) as OverlayState['inputMode']
+        {
+          const inputMode = String(params.mode) as OverlayState['inputMode']
+          if (this.overlay.visible && inputMode === 'game') {
+            throw new Error('Game input mode cannot be applied while visible.')
+          }
+          this.overlay.inputMode = inputMode
+        }
         return this.overlay
+      case 'overlay.presentationReady':
+        this.overlay.visible = true
+        return { presentationId: String(params.presentationId), accepted: true }
       case 'extensions.list':
         return {
           total: extensions.length,
@@ -241,6 +303,7 @@ export class DemoTransport implements WebViewTransport {
       }
       case 'menu.invoke':
         return { succeeded: true, confirmationRequired: false, replayed: false, value: { nodeId: params.nodeId, value: params.value } }
+      case 'ui.playMenuCue': return { played: true, cue: String(params.cue) }
       case 'events.subscribe': {
         const events = Array.isArray(params.events) ? params.events.filter((event): event is string => typeof event === 'string') : []
         const id = `demo-sub-${++this.subscriptionSequence}`

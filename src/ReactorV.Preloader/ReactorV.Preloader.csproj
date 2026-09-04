@@ -10,13 +10,25 @@
     <Nullable>enable</Nullable>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <Version>0.2.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))=/_/</PathMap>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ReactorV.Core\RageWebUI.Core.csproj" />
+    <ProjectReference Include="..\ReactorV.Runtime\RageWebUI.Runtime.csproj" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,10 +37,20 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
+    <Compile Include="..\Shared\HostSurfaceIntentPolicy.cs" Link="HostSurfaceIntentPolicy.cs" />
+    <Compile Include="..\Shared\NormalExitMarkerCleanup.cs" Link="NormalExitMarkerCleanup.cs" />
+    <Compile Include="..\Shared\TargetProcessExitCodeReader.cs" Link="TargetProcessExitCodeReader.cs" />
+    <Compile Include="..\Shared\TargetWindowLifecycleJournal.cs" Link="TargetWindowLifecycleJournal.cs" />
+    <Compile Include="..\Shared\Win32GameWindowLocator.cs" Link="Win32GameWindowLocator.cs" />
+    <Compile Include="..\Shared\OverlayPresentationPolicy.cs" Link="OverlayPresentationPolicy.cs" />
+    <Compile Include="..\Shared\WindowedInputPolicy.cs" Link="WindowedInputPolicy.cs" />
+    <Compile Include="..\Shared\PreProviderAboutInputPolicy.cs" Link="PreProviderAboutInputPolicy.cs" />
     <Compile Include="..\Shared\WebView2EnvironmentFactory.cs" Link="WebView2EnvironmentFactory.cs" />
     <Compile Include="..\Shared\WebView2LocalPagePolicy.cs" Link="WebView2LocalPagePolicy.cs" />
     <Compile Include="..\Shared\WebView2LocalPage.cs" Link="WebView2LocalPage.cs" />
     <Compile Include="..\Shared\WebView2ReadinessPolicy.cs" Link="WebView2ReadinessPolicy.cs" />
     <Compile Include="..\Shared\WebView2PageReadiness.cs" Link="WebView2PageReadiness.cs" />
+    <Compile Include="..\Shared\WebView2ProcessFailurePolicy.cs" Link="WebView2ProcessFailurePolicy.cs" />
   </ItemGroup>
 </Project>

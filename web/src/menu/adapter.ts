@@ -33,9 +33,10 @@ export function adaptMenusToRoutes(menus: MenuDescriptor[], rootMenuId: string):
     parentId?: string,
     layout: MenuRoute['layout'] = 'list',
     columns?: number,
+    tabParentId?: string,
   ) => {
     const items: MenuItem[] = []
-    const route: MenuRoute = { id: routeId, menuId: menu.id, title, parentId, layout, columns, items }
+    const route: MenuRoute = { id: routeId, menuId: menu.id, title, parentId, layout, columns, tabParentId, items }
     routes.push(route)
 
     for (const node of nodes) {
@@ -129,7 +130,7 @@ export function adaptMenusToRoutes(menus: MenuDescriptor[], rootMenuId: string):
           for (const tab of node.tabs) {
             const tabRouteId = `${tabHubId}/${tab.id}`
             tabItems.push({ id: tab.id, label: tab.label, type: 'route', routeId: tabRouteId })
-            buildRoute(menu, tabRouteId, tab.label, tab.nodes, tabHubId)
+            buildRoute(menu, tabRouteId, tab.label, tab.nodes, tabHubId, 'list', undefined, tabHubId)
           }
           break
         }

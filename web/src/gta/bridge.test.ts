@@ -41,6 +41,16 @@ describe('GtaBridge', () => {
     client.destroy()
   })
 
+  it('uses a caller-selected request prefix to prevent cross-browser ID collisions', async () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true, 'gpu')
+    const result = client.invoke('game.getState')
+    expect(transport.last.id).toMatch(/^gpu-/)
+    transport.receive({ kind: 'response', id: transport.last.id, result: true })
+    await expect(result).resolves.toBe(true)
+    client.destroy()
+  })
+
   it('rejects an API error with its code', async () => {
     const transport = new FakeTransport()
     const client = new GtaBridge(transport, true)
@@ -91,6 +101,28 @@ describe('GtaBridge', () => {
     transport.receive({ kind: 'event', event: 'game.state', payload: { gameTime: 2 } })
 
     expect(listener).toHaveBeenCalledOnce()
+    client.destroy()
+  })
+
+  it('replays only bounded lifecycle state and clears a dismissed presentation', () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true)
+    transport.receive({
+      kind: 'event', event: 'menu.presentation',
+      payload: { presentationId: 'menu-1', extensionId: 'fixture', menuId: 'main' },
+    })
+
+    const replayed = vi.fn()
+    client.on('menu.presentation', replayed, true)
+    expect(replayed).toHaveBeenCalledOnce()
+
+    transport.receive({
+      kind: 'event', event: 'menu.dismissed',
+      payload: { presentationId: 'menu-1', reason: 'overlay-hidden' },
+    })
+    const afterDismissal = vi.fn()
+    client.on('menu.presentation', afterDismissal, true)
+    expect(afterDismissal).not.toHaveBeenCalled()
     client.destroy()
   })
 
@@ -159,6 +191,92 @@ describe('GtaBridge', () => {
     const client = new GtaBridge(transport, true)
 
     await expect(client.invoke('game.getState')).rejects.toMatchObject({ code: 'transport_error' })
+    client.destroy()
+  })
+
+  it('closes a bootstrap surface without waiting for the managed provider', () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true)
+
+    client.closeHostSurface()
+
+    expect(transport.last).toEqual({
+      kind: 'host', command: 'close', protocolVersion: 2, minimumProtocolVersion: 1,
+    })
+    client.destroy()
+  })
+
+  it('acknowledges only a valid committed bootstrap surface generation', () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true)
+
+    client.markHostSurfaceReady('initializing', 12)
+
+    expect(transport.last).toEqual({
+      kind: 'host', command: 'surface-ready', mode: 'initializing', generation: 12,
+      protocolVersion: 2, minimumProtocolVersion: 1,
+    })
+    client.markHostSurfaceReady('verifying', 13)
+    expect(transport.last).toEqual({
+      kind: 'host', command: 'surface-ready', mode: 'verifying', generation: 13,
+      protocolVersion: 2, minimumProtocolVersion: 1,
+    })
+    client.markHostSurfaceReady('setup-status', 14)
+    expect(transport.last).toEqual({
+      kind: 'host', command: 'surface-ready', mode: 'setup-status', generation: 14,
+      protocolVersion: 2, minimumProtocolVersion: 1,
+    })
+    expect(() => client.markHostSurfaceReady('about', 0)).toThrowError(/positive integer/)
+    client.destroy()
+  })
+
+  it('publishes exact accelerated provider pixels as a one-way host signal', () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true)
+
+    client.markExternalProviderSurfacePainted('gbay:home:42', 7)
+
+    expect(transport.last).toEqual({
+      kind: 'host',
+      command: 'provider-surface-painted',
+      presentationId: 'gbay:home:42',
+      providerSessionGeneration: 7,
+      protocolVersion: 2,
+      minimumProtocolVersion: 1,
+    })
+    expect(() => client.markExternalProviderSurfacePainted('', 7)).toThrowError(/presentation/i)
+    expect(() => client.markExternalProviderSurfacePainted('gbay:home:42', 0)).toThrowError(/generation/i)
+    client.destroy()
+  })
+
+  it('publishes only bounded read-only live acceptance menu state', () => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true)
+    const state = {
+      presentationId: 'allin1.gbay:home:42',
+      providerId: 'allin1.gbay',
+      rootMenuId: 'home',
+      menuId: 'garage',
+      routeId: 'garage',
+      sectionId: 'garage',
+      payloadStatus: 'ready' as const,
+      itemCount: 12,
+      contentItemCount: 3,
+      actionableItemCount: 2,
+      statusItemCount: 1,
+    }
+
+    client.reportLiveAcceptanceMenuState(state)
+
+    expect(transport.last).toEqual({
+      kind: 'acceptance', command: 'menu-state', schemaVersion: 1, ...state,
+    })
+    expect(() => client.reportLiveAcceptanceMenuState({
+      ...state, routeId: '../garage',
+    })).toThrowError(/invalid/i)
+    expect(() => client.reportLiveAcceptanceMenuState({
+      ...state, contentItemCount: 1,
+    })).toThrowError(/invalid/i)
     client.destroy()
   })
 })

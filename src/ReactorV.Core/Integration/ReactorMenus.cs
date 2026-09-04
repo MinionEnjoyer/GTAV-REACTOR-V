@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace ReactorV.Integration
@@ -27,6 +29,8 @@ namespace ReactorV.Integration
 
     public abstract class ReactorMenuNode
     {
+        private JObject _boundParameters = new JObject();
+
         protected ReactorMenuNode(
             string id,
             ReactorMenuNodeKind kind,
@@ -50,6 +54,13 @@ namespace ReactorV.Integration
         public bool Enabled { get; }
         public bool Visible { get; }
 
+        /// <summary>
+        /// Parameters owned by the extension and attached to this node's action.
+        /// A detached copy is returned so callers cannot mutate a registered menu.
+        /// Browser-provided values may supplement, but never replace, these values.
+        /// </summary>
+        public JObject BoundParameters => (JObject)_boundParameters.DeepClone();
+
         internal JObject ToJson()
         {
             var result = new JObject
@@ -61,6 +72,8 @@ namespace ReactorV.Integration
                 ["enabled"] = Enabled,
                 ["visible"] = Visible,
             };
+            if (_boundParameters.Count > 0)
+                result["boundParameters"] = _boundParameters.DeepClone();
             WriteJson(result);
             return result;
         }
@@ -70,6 +83,19 @@ namespace ReactorV.Integration
 
         protected static string ActionId(string value) =>
             ReactorValidation.Identifier(value, nameof(value), 64, allowDots: true);
+
+        protected void SetBoundParameters(JObject? value)
+        {
+            var detached = value == null ? new JObject() : (JObject)value.DeepClone();
+            if (!ReactorValidation.IsWithinDepth(detached, ReactorExtensionLimits.MaximumPayloadDepth))
+                throw new ArgumentException("Bound parameters exceed the transport nesting limit.", nameof(value));
+            if (Encoding.UTF8.GetByteCount(detached.ToString(Formatting.None)) >
+                ReactorExtensionLimits.MaximumTransportPayload)
+                throw new ArgumentException("Bound parameters exceed the transport-safe 60 KiB limit.", nameof(value));
+            _boundParameters = detached;
+        }
+
+        internal JObject BoundParametersSnapshot() => (JObject)_boundParameters.DeepClone();
 
         internal static IReadOnlyList<ReactorMenuNode> Nodes(IEnumerable<ReactorMenuNode> values)
         {
@@ -84,19 +110,58 @@ namespace ReactorV.Integration
 
     public sealed class ReactorActionNode : ReactorMenuNode
     {
-        public ReactorActionNode(string id, string label, string actionId, string description = "", bool enabled = true, bool visible = true)
-            : base(id, ReactorMenuNodeKind.Action, label, description, enabled, visible) => Action = ActionId(actionId);
+        public ReactorActionNode(
+            string id,
+            string label,
+            string actionId,
+            string description = "",
+            bool enabled = true,
+            bool visible = true)
+            : this(id, label, actionId, description, enabled, visible, null) { }
+
+        public ReactorActionNode(
+            string id,
+            string label,
+            string actionId,
+            string description,
+            bool enabled,
+            bool visible,
+            JObject? boundParameters)
+            : base(id, ReactorMenuNodeKind.Action, label, description, enabled, visible)
+        {
+            Action = ActionId(actionId);
+            SetBoundParameters(boundParameters);
+        }
         public string Action { get; }
         internal override void WriteJson(JObject target) => target["actionId"] = Action;
     }
 
     public sealed class ReactorToggleNode : ReactorMenuNode
     {
-        public ReactorToggleNode(string id, string label, string actionId, bool value, string description = "", bool enabled = true, bool visible = true)
+        public ReactorToggleNode(
+            string id,
+            string label,
+            string actionId,
+            bool value,
+            string description = "",
+            bool enabled = true,
+            bool visible = true)
+            : this(id, label, actionId, value, description, enabled, visible, null) { }
+
+        public ReactorToggleNode(
+            string id,
+            string label,
+            string actionId,
+            bool value,
+            string description,
+            bool enabled,
+            bool visible,
+            JObject? boundParameters)
             : base(id, ReactorMenuNodeKind.Toggle, label, description, enabled, visible)
         {
             Action = ActionId(actionId);
             Value = value;
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public bool Value { get; }
@@ -130,6 +195,18 @@ namespace ReactorV.Integration
             string description = "",
             bool enabled = true,
             bool visible = true)
+            : this(id, label, actionId, options, selectedId, description, enabled, visible, null) { }
+
+        public ReactorChoiceNode(
+            string id,
+            string label,
+            string actionId,
+            IEnumerable<ReactorChoiceOption> options,
+            string selectedId,
+            string description,
+            bool enabled,
+            bool visible,
+            JObject? boundParameters)
             : base(id, ReactorMenuNodeKind.Choice, label, description, enabled, visible)
         {
             Action = ActionId(actionId);
@@ -141,6 +218,7 @@ namespace ReactorV.Integration
             if (!values.Any(value => string.Equals(value.Id, SelectedId, StringComparison.OrdinalIgnoreCase)))
                 throw new ArgumentException("The selected choice must exist in options.", nameof(selectedId));
             Options = values;
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public IReadOnlyList<ReactorChoiceOption> Options { get; }
@@ -166,6 +244,20 @@ namespace ReactorV.Integration
             string description = "",
             bool enabled = true,
             bool visible = true)
+            : this(id, label, actionId, value, minimum, maximum, step, description, enabled, visible, null) { }
+
+        public ReactorRangeNode(
+            string id,
+            string label,
+            string actionId,
+            double value,
+            double minimum,
+            double maximum,
+            double step,
+            string description,
+            bool enabled,
+            bool visible,
+            JObject? boundParameters)
             : base(id, ReactorMenuNodeKind.Range, label, description, enabled, visible)
         {
             if (double.IsNaN(value) || double.IsNaN(minimum) || double.IsNaN(maximum) || double.IsNaN(step) ||
@@ -177,6 +269,7 @@ namespace ReactorV.Integration
             Minimum = minimum;
             Maximum = maximum;
             Step = step;
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public double Value { get; }
@@ -205,7 +298,8 @@ namespace ReactorV.Integration
             int maximumLength,
             string description,
             bool enabled,
-            bool visible)
+            bool visible,
+            JObject? boundParameters)
             : base(id, kind, label, description, enabled, visible)
         {
             Action = ActionId(actionId);
@@ -213,6 +307,7 @@ namespace ReactorV.Integration
             Value = ReactorValidation.Text(value, nameof(value), maximumLength, required: false);
             Placeholder = ReactorValidation.Text(placeholder, nameof(placeholder), 256, required: false);
             MaximumLength = maximumLength;
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public string Value { get; }
@@ -230,22 +325,32 @@ namespace ReactorV.Integration
     public sealed class ReactorTextNode : ReactorInputNode
     {
         public ReactorTextNode(string id, string label, string actionId, string value = "", string placeholder = "", int maximumLength = 256, string description = "", bool enabled = true, bool visible = true)
-            : base(id, ReactorMenuNodeKind.Text, label, actionId, value, placeholder, maximumLength, description, enabled, visible) { }
+            : this(id, label, actionId, value, placeholder, maximumLength, description, enabled, visible, null) { }
+
+        public ReactorTextNode(string id, string label, string actionId, string value, string placeholder, int maximumLength, string description, bool enabled, bool visible, JObject? boundParameters)
+            : base(id, ReactorMenuNodeKind.Text, label, actionId, value, placeholder, maximumLength, description, enabled, visible, boundParameters) { }
     }
 
     public sealed class ReactorSearchNode : ReactorInputNode
     {
         public ReactorSearchNode(string id, string label, string actionId, string value = "", string placeholder = "Search", int maximumLength = 256, string description = "", bool enabled = true, bool visible = true)
-            : base(id, ReactorMenuNodeKind.Search, label, actionId, value, placeholder, maximumLength, description, enabled, visible) { }
+            : this(id, label, actionId, value, placeholder, maximumLength, description, enabled, visible, null) { }
+
+        public ReactorSearchNode(string id, string label, string actionId, string value, string placeholder, int maximumLength, string description, bool enabled, bool visible, JObject? boundParameters)
+            : base(id, ReactorMenuNodeKind.Search, label, actionId, value, placeholder, maximumLength, description, enabled, visible, boundParameters) { }
     }
 
     public sealed class ReactorKeybindNode : ReactorMenuNode
     {
         public ReactorKeybindNode(string id, string label, string actionId, string binding, string description = "", bool enabled = true, bool visible = true)
+            : this(id, label, actionId, binding, description, enabled, visible, null) { }
+
+        public ReactorKeybindNode(string id, string label, string actionId, string binding, string description, bool enabled, bool visible, JObject? boundParameters)
             : base(id, ReactorMenuNodeKind.Keybind, label, description, enabled, visible)
         {
             Action = ActionId(actionId);
             Binding = ReactorValidation.Text(binding, nameof(binding), 64, required: false);
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public string Binding { get; }
@@ -394,6 +499,18 @@ namespace ReactorV.Integration
             string description = "",
             bool enabled = true,
             bool visible = true)
+            : this(id, label, actionId, page, pageCount, description, enabled, visible, null) { }
+
+        public ReactorPaginationNode(
+            string id,
+            string label,
+            string actionId,
+            int page,
+            int pageCount,
+            string description,
+            bool enabled,
+            bool visible,
+            JObject? boundParameters)
             : base(id, ReactorMenuNodeKind.Pagination, label, description, enabled, visible)
         {
             if (pageCount < 1 || pageCount > 100_000)
@@ -403,6 +520,7 @@ namespace ReactorV.Integration
             Action = ActionId(actionId);
             Page = page;
             PageCount = pageCount;
+            SetBoundParameters(boundParameters);
         }
         public string Action { get; }
         public int Page { get; }
@@ -492,7 +610,7 @@ namespace ReactorV.Integration
                 if (++count > 512) throw new ArgumentException("A menu may contain at most 512 nodes.", nameof(Nodes));
                 foreach (var child in entry.Item1.Children.Reverse()) pending.Push(Tuple.Create(child, entry.Item2 + 1));
             }
-            if (ToJson("validation").ToString(Newtonsoft.Json.Formatting.None).Length >
+            if (Encoding.UTF8.GetByteCount(ToJson("validation").ToString(Formatting.None)) >
                 ReactorExtensionLimits.MaximumTransportPayload)
                 throw new ArgumentException("The serialized menu exceeds the transport-safe 60 KiB limit.", nameof(Nodes));
         }

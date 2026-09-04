@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import App from './App'
 import './styles.css'
+import { installWindowedInputForwarding } from './gta/windowedInput'
 
 declare global {
   interface Window {
@@ -11,6 +12,8 @@ declare global {
 
 const rootElement = document.getElementById('root')!
 const root = createRoot(rootElement)
+const disposeWindowedInput = installWindowedInputForwarding()
+window.addEventListener('beforeunload', disposeWindowedInput, { once: true })
 flushSync(() => root.render(<App />))
 
 async function publishFirstPaint() {

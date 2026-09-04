@@ -49,7 +49,7 @@ export class MenuController {
   private stack: string[]
 
   constructor(
-    private readonly menu: RoutedMenuDescriptor,
+    private menu: RoutedMenuDescriptor,
     private readonly options: MenuControllerOptions = {},
   ) {
     for (const route of structuredClone(menu.routes ?? [])) {
@@ -81,6 +81,22 @@ export class MenuController {
     return itemId ? this.currentRoute.items.find((item) => item.id === itemId) : undefined
   }
 
+  /** Replace host descriptors in place without remounting the menu surface. */
+  replaceMenu(menu: RoutedMenuDescriptor): MenuControllerSnapshot {
+    const previous = this.snapshot
+    const replacementRoutes = new Map<string, MenuRoute>()
+    for (const route of structuredClone(menu.routes ?? [])) {
+      replacementRoutes.set(route.id, route)
+    }
+    if (!replacementRoutes.has(menu.homeRouteId)) {
+      throw new Error(`Menu '${menu.id}' does not contain home route '${menu.homeRouteId}'.`)
+    }
+    this.menu = menu
+    this.routes.clear()
+    replacementRoutes.forEach((route, id) => this.routes.set(id, route))
+    return this.restore(previous)
+  }
+
   push(routeId: string): MenuControllerSnapshot {
     this.requireRoute(routeId)
     this.stack.push(routeId)
@@ -109,6 +125,36 @@ export class MenuController {
     return this.changed()
   }
 
+  /**
+   * Restore navigation after the host replaces a descriptor. Only routes and
+   * focus targets present in the new authoritative tree survive; removed
+   * routes fall back to Home instead of leaving stale browser state active.
+   */
+  restore(previous: MenuControllerSnapshot): MenuControllerSnapshot {
+    const boundedStack = Array.isArray(previous.stack) ? previous.stack.slice(0, 64) : []
+    const restored = [this.menu.homeRouteId]
+    // A navigation stack is an ordered path, not a bag of surviving route
+    // ids. Once an authoritative refresh removes one segment, every deeper
+    // segment is unreachable even if a route with that id still exists.
+    if (boundedStack[0] === this.menu.homeRouteId) {
+      for (let index = 1; index < boundedStack.length; index += 1) {
+        const routeId = boundedStack[index]
+        if (typeof routeId !== 'string' || !this.routes.has(routeId)) break
+        if (routeId !== restored[restored.length - 1]) restored.push(routeId)
+      }
+    }
+    this.stack = restored
+
+    const current = this.currentRoute
+    if (previous.route?.id === current.id && previous.focusedItemId &&
+      current.items.some((item) => item.id === previous.focusedItemId && isFocusable(item))) {
+      this.focusByRoute.set(current.id, previous.focusedItemId)
+    } else {
+      this.restoreFocus(current.id)
+    }
+    return this.changed()
+  }
+
   focus(itemId: string): boolean {
     const item = this.currentRoute.items.find((candidate) => candidate.id === itemId)
     if (!item || !isFocusable(item)) return false
@@ -127,6 +173,22 @@ export class MenuController {
     this.focusByRoute.set(this.currentRoute.id, items[nextIndex].id)
     this.changed()
     return structuredClone(items[nextIndex])
+  }
+
+  moveTab(delta: number): boolean {
+    const route = this.currentRoute
+    if (!route.tabParentId || !Number.isFinite(delta) || delta === 0) return false
+    const hub = this.requireRoute(route.tabParentId)
+    const tabs = hub.items.filter((item): item is Extract<MenuItem, { type: 'route' }> =>
+      item.type === 'route')
+    const currentIndex = tabs.findIndex((item) => item.routeId === route.id)
+    if (currentIndex < 0 || tabs.length < 2) return false
+    const direction = delta < 0 ? -1 : 1
+    const next = tabs[(currentIndex + direction + tabs.length) % tabs.length]
+    this.stack[this.stack.length - 1] = next.routeId
+    this.restoreFocus(next.routeId)
+    this.changed()
+    return true
   }
 
   async activate(metadata: MenuControllerInvocationOptions = {}): Promise<MenuInvocation | undefined> {
@@ -149,9 +211,17 @@ export class MenuController {
 
   async setValue(value: JsonValue, metadata: MenuControllerInvocationOptions = {}): Promise<MenuInvocation | undefined> {
     const item = this.focusedItem
-    if (!item || !isAvailable(item) || !this.applyValue(item, value)) return undefined
+    if (!item || !isAvailable(item)) return undefined
+    const previousValue = this.itemValue(item)
+    if (!this.applyValue(item, value)) return undefined
     this.changed()
-    return this.dispatch('set-value', this.itemValue(item), metadata)
+    try {
+      return await this.dispatch('set-value', this.itemValue(item), metadata)
+    } catch (error) {
+      this.applyValue(item, previousValue)
+      this.changed()
+      throw error
+    }
   }
 
   async adjust(delta: number, metadata: MenuControllerInvocationOptions = {}): Promise<MenuInvocation | undefined> {
@@ -191,9 +261,17 @@ export class MenuController {
         return undefined
     }
 
-    if (value === undefined || !this.applyValue(item, value)) return undefined
+    if (value === undefined) return undefined
+    const previousValue = this.itemValue(item)
+    if (!this.applyValue(item, value)) return undefined
     this.changed()
-    return this.dispatch('adjust', value, metadata)
+    try {
+      return await this.dispatch('adjust', value, metadata)
+    } catch (error) {
+      this.applyValue(item, previousValue)
+      this.changed()
+      throw error
+    }
   }
 
   private applyValue(item: MenuItem, value: JsonValue): boolean {

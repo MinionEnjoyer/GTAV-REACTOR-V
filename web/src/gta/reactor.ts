@@ -13,18 +13,34 @@ import type {
   MenuInvocationResult,
   OverlayInputMode,
   OverlayState,
+  OverlayStateRequest,
   OverlayVisibility,
+  PresentationReadyResult,
   RuntimeDescription,
   RuntimeHandshake,
   RuntimeHandshakeRequest,
   RuntimeLifecycleEvent,
+  StartupStatus,
 } from './types'
 
 export interface ManagedEventSubscription extends EventSubscription {
+  disposeLocal(): void
   unsubscribe(options?: InvokeOptions): Promise<boolean>
 }
 
+export type MenuAudioCue = 'navigate' | 'select' | 'back' | 'error'
+
 export class ReactorVApi {
+  readonly ui = {
+    playMenuCue: (cue: MenuAudioCue, options?: InvokeOptions) =>
+      this.bridge.invoke<{ played: boolean; cue: MenuAudioCue }>('ui.playMenuCue', { cue }, options),
+  }
+
+  readonly startup = {
+    getStatus: (options?: InvokeOptions) =>
+      this.bridge.invoke<StartupStatus>('startup.getStatus', {}, options),
+  }
+
   readonly runtime = {
     handshake: (request: RuntimeHandshakeRequest = {}, options?: InvokeOptions) =>
       this.bridge.invoke<RuntimeHandshake>('runtime.handshake', { ...request }, options),
@@ -33,10 +49,18 @@ export class ReactorVApi {
   }
 
   readonly overlay = {
+    setState: (state: OverlayStateRequest, options?: InvokeOptions) =>
+      this.bridge.invoke<OverlayState>('overlay.setState', { ...state }, options),
     setVisibility: (visibility: OverlayVisibility, options?: InvokeOptions) =>
       this.bridge.invoke<OverlayState>('overlay.setVisibility', { visibility }, options),
     setInputMode: (mode: OverlayInputMode, options?: InvokeOptions) =>
       this.bridge.invoke<OverlayState>('overlay.setInputMode', { mode }, options),
+    presentationReady: (presentationId: string, options?: InvokeOptions) =>
+      this.bridge.invoke<PresentationReadyResult>(
+        'overlay.presentationReady',
+        { presentationId },
+        options,
+      ),
   }
 
   readonly extensions = {
@@ -75,26 +99,33 @@ export class ReactorVApi {
         ? [...new Set(request.events)].map((eventName) =>
             this.bridge.on(eventName, (payload) => listener(eventName, payload)))
         : []
+      let localActive = true
+      const disposeLocal = () => {
+        if (!localActive) return
+        localActive = false
+        stops.forEach((stop) => stop())
+      }
       let subscription: EventSubscription
       try {
         subscription = await this.bridge.invoke<EventSubscription>('events.subscribe', { ...request }, options)
       } catch (error) {
-        stops.forEach((stop) => stop())
+        disposeLocal()
         throw error
       }
       let active = true
 
       return {
         ...subscription,
+        disposeLocal,
         unsubscribe: async (unsubscribeOptions?: InvokeOptions) => {
           if (!active) return false
-          stops.forEach((stop) => stop())
+          active = false
+          disposeLocal()
           const result = await this.bridge.invoke<{ removed: boolean }>(
             'events.unsubscribe',
             { subscriptionId: subscription.id },
             unsubscribeOptions,
           )
-          active = false
           return result.removed
         },
       }

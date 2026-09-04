@@ -44,6 +44,41 @@ export interface DependencyStatus {
   detail: string
 }
 
+export type StartupComponentId = 'reactor' | 'scripthook' | 'managed-bridge' | 'allin1'
+export type StartupComponentState = 'ready' | 'initializing' | 'waiting' | 'unavailable'
+export type StartupPhase = 'reactor-starting' | 'waiting-for-provider' | 'provider-connected'
+
+export interface StartupComponentStatus {
+  id: StartupComponentId
+  label: string
+  state: StartupComponentState
+  detail: string
+}
+
+export interface StartupConsoleEntry {
+  sequence: number
+  timestampUtc: string
+  source: string
+  stage: string
+  message: string
+}
+
+export interface StartupStatus {
+  schemaVersion: 1
+  sequence: number
+  sessionId: string
+  phase: StartupPhase
+  providerConnected: boolean
+  defaultMenuRequested: boolean
+  defaultMenuDeadlineUtc: string | null
+  components: StartupComponentStatus[]
+  console: {
+    maxEntries: number
+    dropped: number
+    entries: StartupConsoleEntry[]
+  }
+}
+
 export interface RuntimeStatus {
   apiVersion: number
   runtime: string
@@ -106,11 +141,21 @@ export interface RuntimeDescription {
 }
 
 export type OverlayVisibility = 'hidden' | 'visible' | 'toggle'
-export type OverlayInputMode = 'game' | 'menu' | 'pointer' | 'exclusive'
+export type OverlayInputMode = 'game' | 'menu' | 'interactive-menu' | 'pointer' | 'exclusive'
 
 export interface OverlayState {
   visible: boolean
   inputMode: OverlayInputMode
+}
+
+export interface OverlayStateRequest {
+  visibility: OverlayVisibility
+  inputMode: OverlayInputMode
+}
+
+export interface PresentationReadyResult {
+  presentationId: string
+  accepted: boolean
 }
 
 export interface ExtensionParameterDescriptor {
@@ -195,6 +240,8 @@ export interface MenuNodeBase {
   description: string
   enabled: boolean
   visible: boolean
+  /** Host-owned values are descriptive only and are never echoed by the browser. */
+  boundParameters?: JsonObject
 }
 
 export interface MenuActionNode extends MenuNodeBase {
@@ -498,6 +545,7 @@ export interface MenuRoute {
   subtitle?: string
   home?: boolean
   parentId?: string
+  tabParentId?: string
   revision?: string
   initialFocusId?: string
   layout?: 'list' | 'grid'

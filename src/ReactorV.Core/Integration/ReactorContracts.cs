@@ -8,6 +8,16 @@ using Newtonsoft.Json.Linq;
 
 namespace ReactorV.Integration
 {
+    public static class ReactorExtensionCapabilities
+    {
+        /// <summary>
+        /// Declares the single extension that owns managed physical F9 after
+        /// native bootstrap handoff. Reactor's generic About toggle defers to
+        /// this owner, preventing one key edge from reaching two menus.
+        /// </summary>
+        public const string DefaultF9MenuOwner = "input.f9.default-menu";
+    }
+
     internal static class ReactorExtensionLimits
     {
         // Leave room for the protocol-v2 response/event envelope beneath the
@@ -221,6 +231,31 @@ namespace ReactorV.Integration
             var unknown = parameters.Properties().FirstOrDefault(property => !known.Contains(property.Name));
             if (unknown != null)
                 throw new ReactorValidationException("invalid_params", $"Unknown parameter '{unknown.Name}'.");
+        }
+
+        internal void ValidateBoundParameters(JObject parameters)
+        {
+            foreach (var property in parameters.Properties())
+            {
+                var descriptor = Parameters.FirstOrDefault(value =>
+                    string.Equals(value.Name, property.Name, StringComparison.Ordinal));
+                if (descriptor == null)
+                {
+                    if (!AllowAdditionalParameters)
+                        throw new ReactorValidationException(
+                            "invalid_bound_params",
+                            $"Unknown bound parameter '{property.Name}' for action '{Id}'.");
+                    continue;
+                }
+                try
+                {
+                    descriptor.Validate(property.Value);
+                }
+                catch (ReactorValidationException error)
+                {
+                    throw new ReactorValidationException("invalid_bound_params", error.Message);
+                }
+            }
         }
 
         internal JObject ToJson() => new JObject

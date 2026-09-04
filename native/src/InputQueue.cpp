@@ -1,43 +1,95 @@
 #include "InputQueue.h"
 
+#include <algorithm>
 #include <windowsx.h>
 
 namespace rwui {
 
-InputQueue* InputQueue::active_ = nullptr;
+std::atomic<std::shared_ptr<const InputQueue::CallbackBindings>>
+    InputQueue::bindings_{std::make_shared<const CallbackBindings>()};
+std::mutex InputQueue::bindingLifecycleMutex_;
 
 bool InputQueue::Attach(HWND window) {
-    if (window == nullptr || !IsWindow(window) || active_ != nullptr) {
+    if (window == nullptr || !IsWindow(window) ||
+        window_.load(std::memory_order_acquire) != nullptr) {
         return false;
     }
+    std::scoped_lock bindingLock(bindingLifecycleMutex_);
+    const auto loadedBindings = bindings_.load(std::memory_order_acquire);
+    auto compacted = std::make_shared<CallbackBindings>();
+    compacted->reserve(MaximumCallbackBindings);
+    for (const auto& binding : *loadedBindings) {
+        if (binding->window == window || IsWindow(binding->window)) {
+            compacted->push_back(binding);
+        }
+    }
+    const std::shared_ptr<const CallbackBindings> currentBindings = compacted;
+    if (compacted->size() != loadedBindings->size()) {
+        bindings_.store(currentBindings, std::memory_order_release);
+    }
+    for (const auto& binding : *currentBindings) {
+        if (binding->window != window) continue;
+        InputQueue* expected{};
+        if (!binding->owner.compare_exchange_strong(
+                expected, this, std::memory_order_acq_rel,
+                std::memory_order_acquire)) return false;
+        window_.store(window, std::memory_order_release);
+        return true;
+    }
+    if (currentBindings->size() >= MaximumCallbackBindings) return false;
+
+    auto binding = std::make_shared<CallbackBinding>();
+    binding->owner.store(this, std::memory_order_relaxed);
+    binding->window = window;
+    binding->previousProcedure.store(
+        reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC)),
+        std::memory_order_relaxed);
+    auto updated = std::make_shared<CallbackBindings>(*currentBindings);
+    updated->push_back(binding);
+    bindings_.store(updated, std::memory_order_release);
 
     SetLastError(0);
     const auto previous = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
-        window,
-        GWLP_WNDPROC,
-        reinterpret_cast<LONG_PTR>(&WindowProcedure)));
+        window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowProcedure)));
     if (previous == nullptr && GetLastError() != 0) {
+        binding->owner.store(nullptr, std::memory_order_release);
+        bindings_.store(currentBindings, std::memory_order_release);
         return false;
     }
-
-    window_ = window;
-    previousProcedure_ = previous;
-    active_ = this;
+    binding->previousProcedure.store(previous, std::memory_order_release);
+    window_.store(window, std::memory_order_release);
     return true;
 }
 
 void InputQueue::Detach() {
-    if (window_ != nullptr && previousProcedure_ != nullptr && IsWindow(window_)) {
-        const auto current = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window_, GWLP_WNDPROC));
+    SetCapture(false);
+    const auto window = window_.exchange(nullptr, std::memory_order_acq_rel);
+    std::scoped_lock bindingLock(bindingLifecycleMutex_);
+    const auto currentBindings = bindings_.load(std::memory_order_acquire);
+    const auto found = std::find_if(
+        currentBindings->begin(), currentBindings->end(),
+        [&](const auto& binding) {
+            return binding->window == window &&
+                binding->owner.load(std::memory_order_acquire) == this;
+        });
+    if (found != currentBindings->end()) {
+        const auto binding = *found;
+        binding->owner.store(nullptr, std::memory_order_release);
+        const auto current = IsWindow(window)
+            ? reinterpret_cast<WNDPROC>(
+                GetWindowLongPtrW(window, GWLP_WNDPROC))
+            : nullptr;
         if (current == &WindowProcedure) {
-            SetWindowLongPtrW(window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(previousProcedure_));
+            SetWindowLongPtrW(
+                window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(
+                    binding->previousProcedure.load(
+                        std::memory_order_acquire)));
+            auto updated = std::make_shared<CallbackBindings>(*currentBindings);
+            updated->erase(updated->begin() +
+                std::distance(currentBindings->begin(), found));
+            bindings_.store(updated, std::memory_order_release);
         }
     }
-    if (active_ == this) {
-        active_ = nullptr;
-    }
-    window_ = nullptr;
-    previousProcedure_ = nullptr;
     std::scoped_lock lock(mutex_);
     events_.clear();
 }
@@ -53,7 +105,7 @@ bool InputQueue::Poll(RwuiInputEvent& inputEvent) {
 }
 
 void InputQueue::SetCapture(const bool capture) {
-    capture_ = capture;
+    capture_.store(capture, std::memory_order_release);
 }
 
 LRESULT CALLBACK InputQueue::WindowProcedure(
@@ -61,18 +113,43 @@ LRESULT CALLBACK InputQueue::WindowProcedure(
     const UINT message,
     const WPARAM wParam,
     const LPARAM lParam) {
-    if (active_ == nullptr) {
+    const auto snapshot = bindings_.load(std::memory_order_acquire);
+    const auto found = std::find_if(
+        snapshot->begin(), snapshot->end(),
+        [&](const auto& binding) { return binding->window == window; });
+    if (found == snapshot->end()) {
         return DefWindowProcW(window, message, wParam, lParam);
     }
-    return active_->HandleMessage(window, message, wParam, lParam);
+    const auto binding = *found;
+    const auto previous = binding->previousProcedure.load(
+        std::memory_order_acquire);
+    auto* const owner = binding->owner.load(std::memory_order_acquire);
+    LRESULT result{};
+    try {
+        result = owner != nullptr
+            ? owner->HandleMessage(window, message, wParam, lParam, previous)
+            : previous != nullptr
+            ? CallWindowProcW(previous, window, message, wParam, lParam)
+            : DefWindowProcW(window, message, wParam, lParam);
+    } catch (...) {
+        // Never unwind through user32. In particular, a failed deque growth
+        // must drop only that input event and preserve the exact subclass
+        // chain installed before ReactorV.
+        result = previous != nullptr
+            ? CallWindowProcW(previous, window, message, wParam, lParam)
+            : DefWindowProcW(window, message, wParam, lParam);
+    }
+    if (message == WM_NCDESTROY) RetireBinding(binding);
+    return result;
 }
 
 LRESULT InputQueue::HandleMessage(
     HWND window,
     const UINT message,
     const WPARAM wParam,
-    const LPARAM lParam) {
-    if (capture_) {
+    const LPARAM lParam,
+    const WNDPROC previousProcedure) {
+    if (capture_.load(std::memory_order_acquire)) {
         RwuiInputEvent input{};
         input.modifiers = ReadModifiers();
         input.timestamp = GetTickCount64();
@@ -140,20 +217,47 @@ LRESULT InputQueue::HandleMessage(
         }
     }
 
-    return CallWindowProcW(previousProcedure_, window, message, wParam, lParam);
+    return previousProcedure != nullptr
+        ? CallWindowProcW(previousProcedure, window, message, wParam, lParam)
+        : DefWindowProcW(window, message, wParam, lParam);
 }
 
-void InputQueue::Push(RwuiInputEvent inputEvent) {
-    std::scoped_lock lock(mutex_);
-    if (inputEvent.type == RwuiInputType::MouseMove && !events_.empty() &&
-        events_.back().type == RwuiInputType::MouseMove) {
-        events_.back() = inputEvent;
-        return;
+void InputQueue::RetireBinding(
+    const std::shared_ptr<CallbackBinding>& binding) noexcept {
+    try {
+        if (auto* const owner = binding->owner.exchange(
+                nullptr, std::memory_order_acq_rel)) {
+            HWND expected = binding->window;
+            owner->window_.compare_exchange_strong(
+                expected, nullptr, std::memory_order_acq_rel,
+                std::memory_order_acquire);
+        }
+        std::scoped_lock lock(bindingLifecycleMutex_);
+        const auto current = bindings_.load(std::memory_order_acquire);
+        auto updated = std::make_shared<CallbackBindings>(*current);
+        std::erase(*updated, binding);
+        bindings_.store(updated, std::memory_order_release);
+    } catch (...) {
+        // A destruction callback must always forward and return to user32.
     }
-    if (events_.size() == MaximumEvents) {
-        events_.pop_front();
+}
+
+void InputQueue::Push(RwuiInputEvent inputEvent) noexcept {
+    try {
+        std::scoped_lock lock(mutex_);
+        if (inputEvent.type == RwuiInputType::MouseMove && !events_.empty() &&
+            events_.back().type == RwuiInputType::MouseMove) {
+            events_.back() = inputEvent;
+            return;
+        }
+        if (events_.size() == MaximumEvents) {
+            events_.pop_front();
+        }
+        events_.push_back(inputEvent);
+    } catch (...) {
+        // Input is lossy by contract. Fail open rather than propagating an
+        // allocation/synchronization exception through the HWND callback.
     }
-    events_.push_back(inputEvent);
 }
 
 std::uint32_t InputQueue::ReadModifiers() {
@@ -168,4 +272,3 @@ std::uint32_t InputQueue::ReadModifiers() {
 }
 
 } // namespace rwui
-

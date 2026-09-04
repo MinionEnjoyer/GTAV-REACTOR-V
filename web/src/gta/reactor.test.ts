@@ -12,7 +12,9 @@ class LoopbackTransport implements WebViewTransport {
     this.sent.push(request)
     if (request.kind !== 'request') return
     const method = request.method
-    const result = method === 'runtime.handshake'
+    const result = method === 'startup.getStatus'
+      ? { schemaVersion: 1, sequence: 1, sessionId: 'test', phase: 'provider-connected', providerConnected: true, defaultMenuRequested: false, defaultMenuDeadlineUtc: null, components: [], console: { maxEntries: 48, dropped: 0, entries: [] } }
+      : method === 'runtime.handshake'
       ? { apiVersion: 2, sessionId: 'test', capabilities: [], dependencies: [] }
       : method === 'extensions.list'
         ? { total: 1, items: [{ id: 'fixture', name: 'Fixture', version: '1.0.0', extensionApiVersion: 1, actionCount: 0, eventCount: 0, menuCount: 1 }] }
@@ -22,8 +24,10 @@ class LoopbackTransport implements WebViewTransport {
           ? { extensionId: 'fixture', id: 'main', label: 'Main', description: '', icon: '', order: 0, nodes: [] }
           : method === 'events.subscribe'
             ? { id: 'sub-1', events: ['runtime.lifecycle'] }
-            : method === 'events.unsubscribe'
+        : method === 'events.unsubscribe'
               ? { removed: true }
+              : method === 'ui.playMenuCue'
+                ? { played: true, cue: String((request.params as Record<string, unknown>).cue) }
               : { succeeded: true, confirmationRequired: false, replayed: false, value: null }
     queueMicrotask(() => this.listener?.({ data: { kind: 'response', id: request.id, result } }))
   }
@@ -39,17 +43,36 @@ describe('ReactorVApi', () => {
     const bridge = new GtaBridge(transport, true)
     const api = new ReactorVApi(bridge)
 
+    const startup = await api.startup.getStatus()
     await api.runtime.handshake({ apiVersions: [2, 1] })
     const summaries = await api.extensions.list()
     const detail = await api.extensions.get(summaries.items[0].id)
     const menu = await api.menu.get('fixture', 'main')
 
+    expect(startup).toMatchObject({ schemaVersion: 1, providerConnected: true })
     expect(detail?.menuIds).toEqual(['main'])
     expect(menu).toMatchObject({ extensionId: 'fixture', id: 'main', nodes: [] })
     expect(transport.sent.map((message) => message.method)).toEqual([
-      'runtime.handshake', 'extensions.list', 'extensions.get', 'menu.get',
+      'startup.getStatus', 'runtime.handshake', 'extensions.list', 'extensions.get', 'menu.get',
     ])
-    expect(transport.sent[3].params).toEqual({ extensionId: 'fixture', menuId: 'main' })
+    expect(transport.sent[4].params).toEqual({ extensionId: 'fixture', menuId: 'main' })
+    bridge.destroy()
+  })
+
+  it('sends visibility and input ownership in one overlay state request', async () => {
+    const transport = new LoopbackTransport()
+    const bridge = new GtaBridge(transport, true)
+    const api = new ReactorVApi(bridge)
+
+    await api.overlay.setState({
+      visibility: 'visible',
+      inputMode: 'interactive-menu',
+    })
+
+    expect(transport.sent[0]).toMatchObject({
+      method: 'overlay.setState',
+      params: { visibility: 'visible', inputMode: 'interactive-menu' },
+    })
     bridge.destroy()
   })
 
@@ -87,6 +110,19 @@ describe('ReactorVApi', () => {
     bridge.destroy()
   })
 
+  it('sends only a bounded menu cue identity to the frontend audio host', async () => {
+    const transport = new LoopbackTransport()
+    const bridge = new GtaBridge(transport, true)
+    const api = new ReactorVApi(bridge)
+
+    await expect(api.ui.playMenuCue('error')).resolves.toEqual({ played: true, cue: 'error' })
+    expect(transport.sent[0]).toMatchObject({
+      method: 'ui.playMenuCue',
+      params: { cue: 'error' },
+    })
+    bridge.destroy()
+  })
+
   it('manages remote event subscriptions and local listeners together', async () => {
     const transport = new LoopbackTransport()
     const bridge = new GtaBridge(transport, true)
@@ -99,6 +135,44 @@ describe('ReactorVApi', () => {
     await expect(subscription.unsubscribe()).resolves.toBe(true)
     transport.publish('runtime.lifecycle', { phase: 'paused' })
     expect(listener).toHaveBeenCalledOnce()
+    bridge.destroy()
+  })
+
+  it('removes local listeners when a pending subscription is aborted', async () => {
+    const transport = new LoopbackTransport()
+    const bridge = new GtaBridge(transport, true)
+    const api = new ReactorVApi(bridge)
+    const listener = vi.fn()
+    const abort = new AbortController()
+
+    const pending = api.events.subscribe(
+      { events: ['runtime.lifecycle'] },
+      listener,
+      { signal: abort.signal },
+    )
+    abort.abort()
+
+    await expect(pending).rejects.toThrow()
+    transport.publish('runtime.lifecycle', { phase: 'story-ready' })
+    expect(listener).not.toHaveBeenCalled()
+    bridge.destroy()
+  })
+
+  it('can retire a stale local subscription without using its remote token', async () => {
+    const transport = new LoopbackTransport()
+    const bridge = new GtaBridge(transport, true)
+    const api = new ReactorVApi(bridge)
+    const listener = vi.fn()
+    const subscription = await api.events.subscribe(
+      { events: ['runtime.lifecycle'] },
+      listener,
+    )
+
+    subscription.disposeLocal()
+    transport.publish('runtime.lifecycle', { phase: 'story-ready' })
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(transport.sent.filter((message) => message.method === 'events.unsubscribe')).toHaveLength(0)
     bridge.destroy()
   })
 })

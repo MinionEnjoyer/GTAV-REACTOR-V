@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "product": "reactor-v",
+  "runtime_version": "0.2.0",
+  "extension_api_version": 1,
+  "capabilities": [
+    "story.extensions",
+    "story.menus",
+    "story.menu-presentation",
+    "story.menu-bound-parameters"
+  ]
+}

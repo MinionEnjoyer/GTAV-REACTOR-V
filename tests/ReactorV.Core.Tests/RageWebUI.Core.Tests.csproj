@@ -18,11 +18,38 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ReactorV.Core\RageWebUI.Core.csproj" />
+    <Compile Include="..\..\examples\ReactorV.StandaloneStarter\Shared\MenuPrefabs.cs" Link="Starter\MenuPrefabs.cs" />
+    <Compile Include="..\..\examples\ReactorV.StandaloneStarter\Shared\StarterExtension.cs" Link="Starter\StarterExtension.cs" />
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Shared\BorderConnectedBlackNormalizer.cs" Link="BorderConnectedBlackNormalizer.cs" />
+    <Compile Include="..\..\src\Shared\GbayPresentationTimingPolicy.cs" Link="GbayPresentationTimingPolicy.cs" />
+    <Compile Include="..\..\src\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
+    <Compile Include="..\..\src\Shared\HostSurfaceIntentPolicy.cs" Link="HostSurfaceIntentPolicy.cs" />
+    <Compile Include="..\..\src\Shared\NativeWindowPresentationPolicy.cs" Link="NativeWindowPresentationPolicy.cs" />
+    <Compile Include="..\..\src\Shared\NormalExitMarkerCleanup.cs" Link="NormalExitMarkerCleanup.cs" />
+    <Compile Include="..\..\src\Shared\TargetProcessExitCodeReader.cs" Link="TargetProcessExitCodeReader.cs" />
+    <Compile Include="..\..\src\Shared\TargetWindowLifecycleJournal.cs" Link="TargetWindowLifecycleJournal.cs" />
+    <Compile Include="..\..\src\Shared\Win32GameWindowLocator.cs" Link="Win32GameWindowLocator.cs" />
     <Compile Include="..\..\src\Shared\OverlayPresentationPolicy.cs" Link="OverlayPresentationPolicy.cs" />
+    <Compile Include="..\..\src\Shared\PreProviderAboutInputPolicy.cs" Link="PreProviderAboutInputPolicy.cs" />
     <Compile Include="..\..\src\Shared\WebView2LocalPagePolicy.cs" Link="WebView2LocalPagePolicy.cs" />
     <Compile Include="..\..\src\Shared\WebView2ReadinessPolicy.cs" Link="WebView2ReadinessPolicy.cs" />
+    <Compile Include="..\..\src\Shared\WebView2ProcessFailurePolicy.cs" Link="WebView2ProcessFailurePolicy.cs" />
+    <Compile Include="..\..\src\Shared\WindowedInputPolicy.cs" Link="WindowedInputPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\MenuPresentationPolicy.cs" Link="MenuPresentationPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\MenuInputLease.cs" Link="MenuInputLease.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\MenuRevealGate.cs" Link="MenuRevealGate.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\ProviderPresentationCommitGate.cs" Link="ProviderPresentationCommitGate.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\GameplayMenuInputBindings.cs" Link="GameplayMenuInputBindings.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\ManagedPointerButtonPolicy.cs" Link="ManagedPointerButtonPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.Preloader\HostPointerIngressBuffer.cs" Link="HostPointerIngressBuffer.cs" />
+    <Compile Include="..\..\src\ReactorV.Preloader\ExternalGpuBrowserSession.cs" Link="ExternalGpuBrowserSession.cs" />
+    <Compile Include="..\..\src\ReactorV.DirectX\Browser\AcceleratedSubmitHealthPolicy.cs" Link="AcceleratedSubmitHealthPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.DirectX\Browser\AcceleratedBootstrapRepaintPolicy.cs" Link="AcceleratedBootstrapRepaintPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.DirectX\Browser\GpuAdapterLuid.cs" Link="GpuAdapterLuid.cs" />
+    <Compile Include="..\..\src\ReactorV.DirectX\AdapterLuidDiscoveryWaitPolicy.cs" Link="AdapterLuidDiscoveryWaitPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.DirectX\Native\SharedTextureConsumerDiagnostics.cs" Link="SharedTextureConsumerDiagnostics.cs" />
   </ItemGroup>
 </Project>

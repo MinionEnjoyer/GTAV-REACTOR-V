@@ -12,6 +12,14 @@
     <Version>0.2.0</Version>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))=/_/</PathMap>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ReactorV.Core\RageWebUI.Core.csproj" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
@@ -22,5 +30,11 @@
   <ItemGroup>
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
+    <Compile Include="..\Shared\Win32GameWindowLocator.cs" Link="Win32GameWindowLocator.cs" />
+    <Compile Include="..\Shared\WindowedInputPolicy.cs" Link="WindowedInputPolicy.cs" />
   </ItemGroup>
 </Project>
