@@ -15,6 +15,10 @@ for registering your own Reactor menus.
 [Managed extension API](docs/EXTENSIONS.md) · [Browser API](docs/API.md) ·
 [Architecture](docs/ARCHITECTURE.md)
 
+If you'd like to support Reactor V development, you can
+[buy MinionEnjoyer a coffee](https://buymeacoffee.com/minionenjoyer).
+Support is optional; Reactor V remains free and open source.
+
 ## Edition builds — 0.2.0 preview
 
 Fullscreen overlays have been confirmed in local playtesting on both editions.
