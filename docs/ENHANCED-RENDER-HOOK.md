@@ -1,8 +1,10 @@
 # Enhanced render hook
 
 This document records the boundary for Reactor V's GTA V Enhanced D3D12
-in-frame renderer. It distinguishes evidence already produced by the repository
-from work that still requires the new root hook and a live Enhanced run.
+in-frame renderer. The 0.2.0 edition preview includes the hook following local
+fullscreen playtesting on Enhanced 1.0.1158.13. The acceptance checklist below
+continues to apply to other machines, display configurations, and future builds;
+a successful desktop harness does not establish universal game compatibility.
 
 ## Why Enhanced needs an in-frame hook
 
@@ -11,11 +13,11 @@ prepare React and show a useful fallback in windowed presentation, but DWM
 composition is a different frame boundary from GTA's D3D12 swap chain. The
 external surface therefore cannot be the exclusive-fullscreen contract.
 
-`ReactorV.RenderHook.asi` is the experimental source/build native owner for that
-contract and is explicitly excluded from player ZIPs pending live acceptance. It is
+`ReactorV.RenderHook.asi` is the version-gated native owner for that contract.
+It ships in the Enhanced preview ZIP, not the generic external-host package. It is
 separate from the lifecycle-only `ReactorV.Bootstrap.asi`, has no ScriptHook or
 CLR dependency, and is expected to start from a loader-safe worker after GTA
-loads it as a root plug-in. It will consume browser frames prepared out of
+loads it as a root plug-in. It consumes browser frames prepared out of
 process and composite them immediately before the game's real present call.
 
 ## D3D12 ownership rule

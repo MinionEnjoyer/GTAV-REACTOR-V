@@ -307,6 +307,10 @@ try {
     if ($entryNames.Contains($otherLiveTestMarkerRelativePath)) {
         throw "The $Edition live-test ZIP contains the other edition's package marker: $otherLiveTestMarkerRelativePath"
     }
+    $hasLegacyCpuFrames = $entryNames.Contains('plugins/ReactorV/ReactorV.LegacyCpuFrames.enabled')
+    if ($hasLegacyCpuFrames -ne ($Edition -eq 'Legacy')) {
+        throw 'Legacy must include its CPU-frame bridge marker; Enhanced must not include it.'
+    }
 
     $markerEntry = @(
         $zip.Entries | Where-Object {
