@@ -130,6 +130,20 @@ public sealed class BootstrapHarnessPresentationSourceContractTests
         Assert.Contains("Matches(_committedProviderInputPresentationId, presentationId)", proof);
     }
 
+    [Fact]
+    public void Packaged_native_telemetry_is_preserved_outside_player_staging_before_leak_scan()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "build-package.ps1"));
+        var move = source.IndexOf("Move-Item -LiteralPath $nativeTestLog", StringComparison.Ordinal);
+        var scan = source.IndexOf("$unexpectedPackagedArtifacts =", StringComparison.Ordinal);
+        Assert.True(move > 0 && scan > move);
+        Assert.Contains("@('ReactorV.NativeLifecycle.log', 'ReactorV.NativeLifecycle.log.1')", source);
+        Assert.Contains("Join-Path $artifactsRoot \"harness\\$artifactKind.$nativeTestLogName\"", source);
+        Assert.Contains("$_.Name -like '*.log.*'", source);
+        Assert.Contains("'.log'", source);
+        Assert.Contains("Development artifacts leaked into Reactor staging", source);
+    }
+
     private static string ReadHarness(string fileName) => File.ReadAllText(Path.Combine(
         FindRepositoryRoot(),
         "src",

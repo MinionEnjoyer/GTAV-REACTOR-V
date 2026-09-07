@@ -2069,12 +2069,25 @@ foreach ($harnessFile in @(
     }
 }
 
+# Native lifecycle telemetry is relative to the host executable. Packaged
+# harnesses therefore write beneath rendererRoot, not the game root. Preserve
+# only these known test outputs outside staging; the leak scan remains strict
+# for all other logs and developer files.
+foreach ($nativeTestLogName in @('ReactorV.NativeLifecycle.log', 'ReactorV.NativeLifecycle.log.1')) {
+    $nativeTestLog = Join-Path $rendererRoot "scripts\ReactorV\$nativeTestLogName"
+    if (Test-Path -LiteralPath $nativeTestLog -PathType Leaf) {
+        $nativeTestLogReport = Join-Path $artifactsRoot "harness\$artifactKind.$nativeTestLogName"
+        Move-Item -LiteralPath $nativeTestLog -Destination $nativeTestLogReport -Force
+    }
+}
+
 $unexpectedPackagedArtifacts = @(
     Get-ChildItem -LiteralPath $stagingRoot -Force -Recurse |
         Where-Object {
             ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
             (-not $_.PSIsContainer -and (
                 $_.Name -like '*Harness*' -or
+                $_.Name -like '*.log.*' -or
                 $_.Name -match '(?i)allin1|gbay' -or
                 $_.Extension -in @('.map', '.pdb', '.log', '.tmp', '.rpf', '.ytd', '.ydr', '.yft', '.meta')
             )) -or
