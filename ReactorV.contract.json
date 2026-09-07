@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "reactor-v",
-  "runtime_version": "0.2.0",
+  "runtime_version": "0.2.1",
   "extension_api_version": 1,
   "capabilities": [
     "story.extensions",

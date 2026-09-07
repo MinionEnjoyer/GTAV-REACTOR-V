@@ -1,0 +1,2 @@
+#pragma once
+#define REACTORV_NATIVE_BUILD_ID "lifetime-safety-1-@REACTORV_NATIVE_SOURCE_HASH@"

@@ -159,6 +159,6 @@ public sealed class ProviderInputIntentSourceContractTests
         }
         Assert.NotNull(current);
         return File.ReadAllText(
-            Path.Combine(current!.FullName, Path.Combine(parts)));
+            Path.Combine(current!.FullName, Path.Combine(parts))).Replace("\r\n", "\n");
     }
 }

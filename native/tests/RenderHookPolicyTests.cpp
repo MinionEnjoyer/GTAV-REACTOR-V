@@ -105,12 +105,12 @@ int main() {
         "A missing early-arm export must release the native module.");
     Require(
         reactorv::renderhook::ResolveNativeModuleDisposition(true, 0) ==
-            NativeModuleDisposition::ReleaseFailOpen,
-        "A rejected early arm must unload and leave GTA running.");
+            NativeModuleDisposition::RetainInactive,
+        "A rejected early arm must retain possibly published callbacks.");
     Require(
         reactorv::renderhook::ResolveNativeModuleDisposition(true, -1) ==
-            NativeModuleDisposition::ReleaseFailOpen,
-        "An explicit native failure must unload and leave GTA running.");
+            NativeModuleDisposition::RetainInactive,
+        "An explicit native failure must retain possibly published callbacks.");
     Require(
         reactorv::renderhook::ResolveNativeModuleDisposition(true, 1) ==
             NativeModuleDisposition::RetainArmed,

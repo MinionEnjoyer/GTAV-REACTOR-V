@@ -1491,7 +1491,7 @@ namespace RageWebUI.Harness
                 ["supportedApiVersions"] = new JArray(1, 2),
                 ["sessionId"] = StartupTrace.SessionId,
                 ["runtime"] = "GBAY lifecycle harness",
-                ["runtimeVersion"] = "0.2.0",
+                ["runtimeVersion"] = "0.2.1",
                 ["renderer"] = "WebView2 window",
                 ["edition"] = "Enhanced",
                 ["dependencies"] = new JArray(),

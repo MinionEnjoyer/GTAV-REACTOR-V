@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RageWebUINative VERSION 0.2.0 LANGUAGES C CXX)
+project(RageWebUINative VERSION 0.2.1 LANGUAGES C CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR
@@ -33,7 +33,26 @@ FetchContent_Declare(
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(minhook)
 
+# Fingerprint the native implementation at configure time and reconfigure when
+# it changes. Logs can distinguish dirty local candidates sharing a git SHA.
+file(GLOB_RECURSE REACTORV_IDENTITY_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderhook/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/renderhook/*.h")
+list(SORT REACTORV_IDENTITY_SOURCES)
+set(REACTORV_IDENTITY_INPUT "${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}")
+foreach(identity_source IN LISTS REACTORV_IDENTITY_SOURCES)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${identity_source}")
+    file(SHA256 "${identity_source}" identity_hash)
+    string(APPEND REACTORV_IDENTITY_INPUT "${identity_hash}")
+endforeach()
+file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt" identity_cmake_hash)
+string(APPEND REACTORV_IDENTITY_INPUT "${identity_cmake_hash}")
+string(SHA256 REACTORV_NATIVE_SOURCE_HASH "${REACTORV_IDENTITY_INPUT}")
+configure_file(src/NativeBuildIdentity.h.in generated/NativeBuildIdentity.h @ONLY)
+
 add_library(RageWebUI.Native SHARED
+    src/NativeLifecycleLog.cpp
     src/AdapterLuidDiscovery.cpp
     src/AdapterLuidExports.cpp
     src/D3D11OverlayRenderer.cpp
@@ -57,6 +76,8 @@ add_library(RageWebUI.Native SHARED
     src/SharedGpuFrameTransport.cpp
     src/TestSurface.cpp
 )
+target_include_directories(RageWebUI.Native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_definitions(RageWebUI.Native PRIVATE REACTORV_NATIVE_CONFIGURATION="$<CONFIG>")
 
 add_library(ReactorV.Bootstrap SHARED
     bootstrap/BootstrapMain.cpp
@@ -231,6 +252,30 @@ elseif(MINGW)
     target_link_options(ReactorV.TextureProbe.Partner PRIVATE -municode -static-libgcc -static-libstdc++)
 endif()
 if(BUILD_TESTING)
+    add_executable(ReactorV.NativeLifecycleLog.Tests
+        tests/NativeLifecycleLogTests.cpp src/NativeLifecycleLog.cpp)
+    target_include_directories(ReactorV.NativeLifecycleLog.Tests PRIVATE src
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_definitions(ReactorV.NativeLifecycleLog.Tests PRIVATE
+        NOMINMAX WIN32_LEAN_AND_MEAN REACTORV_NATIVE_CONFIGURATION="$<CONFIG>")
+    set_target_properties(ReactorV.NativeLifecycleLog.Tests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/telemetry-test")
+    add_test(NAME ReactorV.NativeLifecycleLog COMMAND ReactorV.NativeLifecycleLog.Tests)
+    add_executable(ReactorV.HookCleanup.Tests tests/HookCleanupTests.cpp)
+    target_include_directories(ReactorV.HookCleanup.Tests PRIVATE src)
+    add_test(NAME ReactorV.HookCleanup COMMAND ReactorV.HookCleanup.Tests)
+
+    add_library(ReactorV.CallbackLifetime.Probe SHARED
+        tests/CallbackLifetimeProbe.cpp src/InputQueue.cpp)
+    target_include_directories(ReactorV.CallbackLifetime.Probe PRIVATE src include)
+    target_compile_definitions(ReactorV.CallbackLifetime.Probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(ReactorV.CallbackLifetime.Probe PRIVATE user32)
+    add_executable(ReactorV.CallbackLifetime.Tests tests/CallbackLifetimeTests.cpp)
+    target_link_libraries(ReactorV.CallbackLifetime.Tests PRIVATE user32)
+    add_test(NAME ReactorV.CallbackLifetime COMMAND ReactorV.CallbackLifetime.Tests
+        $<TARGET_FILE:ReactorV.CallbackLifetime.Probe>)
+    set_tests_properties(ReactorV.CallbackLifetime PROPERTIES TIMEOUT 20)
+
     add_executable(ReactorV.LegacyVisibilityProbe.Tests
         tests/LegacyVisibilityProbeTests.cpp src/LegacyVisibilityProbe.cpp
         src/D3D11OverlayRenderer.cpp src/FrameMailbox.cpp)

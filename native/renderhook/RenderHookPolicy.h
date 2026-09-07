@@ -35,6 +35,7 @@ struct RenderTargetWindowCandidate {
 
 enum class NativeModuleDisposition {
     ReleaseFailOpen,
+    RetainInactive,
     RetainArmed,
 };
 

@@ -1,4 +1,5 @@
 #include "InputQueue.h"
+#include "NativeModuleLifetime.h"
 
 #include <algorithm>
 #include <windowsx.h>
@@ -14,6 +15,7 @@ bool InputQueue::Attach(HWND window) {
         window_.load(std::memory_order_acquire) != nullptr) {
         return false;
     }
+    if (!RetainCallbackModuleForProcessLifetime()) return false;
     std::scoped_lock bindingLock(bindingLifecycleMutex_);
     const auto loadedBindings = bindings_.load(std::memory_order_acquire);
     auto compacted = std::make_shared<CallbackBindings>();
@@ -80,10 +82,14 @@ void InputQueue::Detach() {
                 GetWindowLongPtrW(window, GWLP_WNDPROC))
             : nullptr;
         if (current == &WindowProcedure) {
-            SetWindowLongPtrW(
+            SetLastError(ERROR_SUCCESS);
+            const auto restored = SetWindowLongPtrW(
                 window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(
                     binding->previousProcedure.load(
                         std::memory_order_acquire)));
+            // On failure Windows still owns our forwarder. Keep its chain
+            // metadata as well as the process-lifetime module reference.
+            if (restored == 0 && GetLastError() != ERROR_SUCCESS) return;
             auto updated = std::make_shared<CallbackBindings>(*currentBindings);
             updated->erase(updated->begin() +
                 std::distance(currentBindings->begin(), found));

@@ -235,6 +235,22 @@ int main() {
         "shared GPU worker contains all C++ failures before thread exit");
 
     const auto input = Read(REACTORV_INPUT_QUEUE_SOURCE_PATH);
+    const auto arm = FunctionBody(hooks, "bool ArmDxgiHooks");
+    Check(arm.find("RetainCallbackModuleForProcessLifetime()") < arm.find("MH_Initialize()"),
+        "native module is retained before any hook can be published");
+    Check(arm.find("createdHookAddresses.reserve(6)") < arm.find("CreateHookTracked("),
+        "tracking storage is reserved before MinHook acquires entries");
+    const auto attach = FunctionBody(input, "bool InputQueue::Attach");
+    Check(attach.find("RetainCallbackModuleForProcessLifetime()") < attach.find("SetWindowLongPtrW("),
+        "input callback module is retained before subclass publication");
+    for (const auto name : {"HRESULT STDMETHODCALLTYPE PresentHook",
+                            "HRESULT STDMETHODCALLTYPE Present1Hook",
+                            "HRESULT STDMETHODCALLTYPE ResizeBuffersHook",
+                            "HRESULT STDMETHODCALLTYPE ResizeBuffers1Hook"}) {
+        const auto body = FunctionBody(hooks, name);
+        Check(!body.empty() && body.find("WriteNativeLifecycle(") == std::string::npos,
+            "render callbacks never synchronously write lifecycle telemetry");
+    }
     const auto callback = FunctionBody(input, "InputQueue::WindowProcedure");
     const auto push = FunctionBody(input, "InputQueue::Push");
     Check(!callback.empty() && callback.find("catch (...)") !=
