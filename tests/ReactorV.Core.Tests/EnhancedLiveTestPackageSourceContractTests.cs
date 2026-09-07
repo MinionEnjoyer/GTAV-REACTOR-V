@@ -25,7 +25,7 @@ namespace RageWebUI.Core.Tests
                 StringComparison.Ordinal);
             Assert.Contains("'enhanced-live-test'", build, StringComparison.Ordinal);
             Assert.Contains(
-                "'ReactorV-0.2.1-enhanced-live-test.zip'",
+                "'ReactorV-0.2.2-enhanced-live-test.zip'",
                 build,
                 StringComparison.Ordinal);
             Assert.Contains("public_release = $false", build, StringComparison.Ordinal);

@@ -19,25 +19,27 @@ If you'd like to support Reactor V development, you can
 [buy MinionEnjoyer a coffee](https://buymeacoffee.com/minionenjoyer).
 Support is optional; Reactor V remains free and open source.
 
-## Edition builds — 0.2.1 preview
+## Edition builds — 0.2.2
 
 Fullscreen overlays have been confirmed in local playtesting on both editions.
-These are **edition-specific previews**, not a claim of compatibility with all
+This is a regular, **edition-specific release**, not a claim of compatibility with all
 game updates or graphics configurations. Executable identity checks remain
 enabled. Install **one** matching runtime ZIP, never both.
 
 | Download | Tested game version | In-frame renderer |
 | --- | --- | --- |
-| `ReactorV-0.2.1-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
-| `ReactorV-0.2.1-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
+| `ReactorV-0.2.2-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
+| `ReactorV-0.2.2-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
 
-The historical `live-test` filenames and markers identify the guarded preview
+The historical `live-test` filenames and markers identify the guarded edition
 profiles. These downloads are full runtime packages, **not incremental patches**.
 Legacy includes `ReactorV.LegacyCpuFrames.enabled`; removing it changes the
-renderer route and is not a supported troubleshooting step for this preview.
+renderer route and is not a supported troubleshooting step.
 The Legacy producer is capped at 15 UI frames/second; this does not cap GTA FPS.
 
-0.2.1 hardens native callback/hook lifetime and adds bounded local lifecycle
+0.2.2 preserves consumer-owned browser compositions during runtime updates and
+raises the passive speedometer by 30 pixels without changing its size or spacing.
+It retains the 0.2.1 native callback/hook lifetime fixes and bounded local lifecycle
 diagnostics. The safety candidate passed an Enhanced startup, menu-interaction
 and normal-exit smoke test; this is not final-build live acceptance on both
 editions or confirmation that issue #1 is resolved. See the

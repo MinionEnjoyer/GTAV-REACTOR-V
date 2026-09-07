@@ -5,7 +5,7 @@
     <RootNamespace>RageWebUI.Core</RootNamespace>
     <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">

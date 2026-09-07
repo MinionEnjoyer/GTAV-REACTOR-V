@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RageWebUINative VERSION 0.2.1 LANGUAGES C CXX)
+project(RageWebUINative VERSION 0.2.2 LANGUAGES C CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR
