@@ -144,6 +144,7 @@ public sealed class CompositionRevealSourceContractTests
             "src",
             "ReactorV.Runtime",
             "WindowedOverlaySession.cs"));
+        session = session.Replace("\r\n", "\n");
         var preloader = File.ReadAllText(Path.Combine(
             root,
             "src",
@@ -155,6 +156,7 @@ public sealed class CompositionRevealSourceContractTests
             "ReactorV.Runtime",
             "OverlayWindow.cs"));
 
+        preloader = preloader.Replace("\r\n", "\n");
         Assert.Contains("window.SignalRevealIngress()", session);
         Assert.Contains("window.SignalHostMessageIngress(json)", session);
         Assert.Contains("queuedWindow.ApplyRevealIngress()", session);

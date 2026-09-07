@@ -555,18 +555,20 @@ DWORD WINAPI RenderHookWorker(void*) noexcept {
         if (reactorv::renderhook::ResolveNativeModuleDisposition(
                 true,
                 armResult) ==
-            reactorv::renderhook::NativeModuleDisposition::ReleaseFailOpen) {
+            reactorv::renderhook::NativeModuleDisposition::RetainInactive) {
             AppendLog(
                 paths.diagnosticsFile,
                 L"inactive",
                 L"reason=early_arm_rejected result=" +
                     std::to_wstring(armResult) +
-                    L" action=inspect_reactorv_native_diagnostics");
-            FreeLibrary(nativeModule);
+                    L" module=retained-for-callback-safety action=inspect_reactorv_native_diagnostics");
+            // A failed arm may have published hooks before rollback failed or
+            // callbacks stopped draining. Retain this reference on failure too;
+            // old native builds do not necessarily implement module pinning.
             return 0;
         }
 
-        // Keep the successful LoadLibrary reference for process lifetime. The
+        // Keep the LoadLibrary reference for process lifetime. The
         // installed hooks execute inside this module and unloading it while
         // GTA can still present would be unsafe. Process teardown releases it.
         AppendLog(

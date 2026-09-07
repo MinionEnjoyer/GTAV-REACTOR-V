@@ -1,6 +1,7 @@
 artifacts/
 .work/
 native/build/
+native/build-safety/
 native/build.pre-reactorv-*/
 native/build-d3d12-debug/
 native/build-msvc-scriptprobe/

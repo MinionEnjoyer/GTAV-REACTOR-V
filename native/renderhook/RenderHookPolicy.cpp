@@ -126,9 +126,9 @@ RenderHookPaths ResolveRenderHookPaths(
 NativeModuleDisposition ResolveNativeModuleDisposition(
     const bool exportAvailable,
     const std::int32_t armResult) noexcept {
-    return exportAvailable && armResult > 0
-        ? NativeModuleDisposition::RetainArmed
-        : NativeModuleDisposition::ReleaseFailOpen;
+    if (!exportAvailable) return NativeModuleDisposition::ReleaseFailOpen;
+    return armResult > 0 ? NativeModuleDisposition::RetainArmed
+                         : NativeModuleDisposition::RetainInactive;
 }
 
 bool IsEligibleEnhancedRenderTarget(

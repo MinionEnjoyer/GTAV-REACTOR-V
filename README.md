@@ -19,7 +19,7 @@ If you'd like to support Reactor V development, you can
 [buy MinionEnjoyer a coffee](https://buymeacoffee.com/minionenjoyer).
 Support is optional; Reactor V remains free and open source.
 
-## Edition builds — 0.2.0 preview
+## Edition builds — 0.2.1 preview
 
 Fullscreen overlays have been confirmed in local playtesting on both editions.
 These are **edition-specific previews**, not a claim of compatibility with all
@@ -28,14 +28,21 @@ enabled. Install **one** matching runtime ZIP, never both.
 
 | Download | Tested game version | In-frame renderer |
 | --- | --- | --- |
-| `ReactorV-0.2.0-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
-| `ReactorV-0.2.0-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
+| `ReactorV-0.2.1-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
+| `ReactorV-0.2.1-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
 
 The historical `live-test` filenames and markers identify the guarded preview
 profiles. These downloads are full runtime packages, **not incremental patches**.
 Legacy includes `ReactorV.LegacyCpuFrames.enabled`; removing it changes the
 renderer route and is not a supported troubleshooting step for this preview.
 The Legacy producer is capped at 15 UI frames/second; this does not cap GTA FPS.
+
+0.2.1 hardens native callback/hook lifetime and adds bounded local lifecycle
+diagnostics. The safety candidate passed an Enhanced startup, menu-interaction
+and normal-exit smoke test; this is not final-build live acceptance on both
+editions or confirmation that issue #1 is resolved. See the
+[native safety notes](docs/NATIVE-LIFETIME-SAFETY.md). The reported one-pixel
+initializer sizing issue is not addressed by this update.
 
 Do not use Reactor in GTA Online. Unsupported executables disable the native
 render route instead of attempting unverified hooks. Vulkan is not supported.

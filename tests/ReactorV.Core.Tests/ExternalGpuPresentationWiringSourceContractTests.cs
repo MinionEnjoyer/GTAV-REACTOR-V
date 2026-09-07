@@ -479,9 +479,11 @@ public sealed class ExternalGpuPresentationWiringSourceContractTests
             setVisible,
             StringComparison.Ordinal);
         Assert.Contains(
-            "externalGpuActive && externalGpuPresentationReady",
+            "BootstrapHarnessPresentationPolicy.UseWebView(",
             setVisible,
             StringComparison.Ordinal);
+        Assert.Contains("window.HasVisibleCommittedProviderPresentation(_dualBrowserReadyPresentationId)", setVisible);
+        Assert.Contains("_dualBrowserReadyProviderSessionGeneration == Volatile.Read(ref _providerSessionGeneration)", setVisible);
         Assert.Contains(
             "BrowserPresentationOwner.WebViewBootstrap",
             setVisible,

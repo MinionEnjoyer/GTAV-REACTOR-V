@@ -101,6 +101,49 @@ public sealed class BootstrapHarnessPresentationSourceContractTests
         Assert.True(success > stableGate);
     }
 
+    [Fact]
+    public void Focus_recovery_is_before_provider_attachment_and_requalifies_pixels()
+    {
+        var source = ReadHarness("BootstrapHostHarness.cs");
+        Assert.True(source.IndexOf("if (!PrepareInitializerForProvider(", StringComparison.Ordinal) <
+            source.IndexOf("var started = proxy.StartForBootstrapGbayHandoff(", StringComparison.Ordinal));
+        var prepare = MethodRegion(source, "private static bool PrepareInitializerForProvider(",
+            "private static bool WaitForVisibleWithForeground(");
+        Assert.Contains("stage=webview_visibility_dismissed reason=game_not_foreground", prepare);
+        Assert.Contains("if (!focusLost || !TrySignalNamedEvent", prepare);
+        Assert.Contains("WaitForStartupSurface(host, visualCapture,", prepare);
+        Assert.Contains("observation.Qualified && observation.SinglePopup", prepare);
+        Assert.Contains("PreloadHandoff.IsDefaultMenuIntentActive(processId)", prepare);
+        Assert.Contains("focus lost after provider attachment; handoff not qualified", source);
+        // Keep the visual gate strict even when the test desktop interferes.
+        Assert.Contains("noTransparent &= frame.ChangedFraction > 0.10d;", source);
+    }
+
+    [Fact]
+    public void Retained_webview_proof_requires_current_visible_accepted_and_committed_identity()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ReactorV.Runtime", "OverlayWindow.cs"));
+        var proof = MethodRegion(source, "public bool HasVisibleCommittedProviderPresentation(", "public void SignalRevealIngress()");
+        Assert.Contains("_actualVisible && _desiredVisible", proof);
+        Assert.Contains("Matches(_activeMenuPresentationId, presentationId)", proof);
+        Assert.Contains("Matches(_acceptedMenuPresentationId, presentationId)", proof);
+        Assert.Contains("Matches(_committedProviderInputPresentationId, presentationId)", proof);
+    }
+
+    [Fact]
+    public void Packaged_native_telemetry_is_preserved_outside_player_staging_before_leak_scan()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "build-package.ps1"));
+        var move = source.IndexOf("Move-Item -LiteralPath $nativeTestLog", StringComparison.Ordinal);
+        var scan = source.IndexOf("$unexpectedPackagedArtifacts =", StringComparison.Ordinal);
+        Assert.True(move > 0 && scan > move);
+        Assert.Contains("@('ReactorV.NativeLifecycle.log', 'ReactorV.NativeLifecycle.log.1')", source);
+        Assert.Contains("Join-Path $artifactsRoot \"harness\\$artifactKind.$nativeTestLogName\"", source);
+        Assert.Contains("$_.Name -like '*.log.*'", source);
+        Assert.Contains("'.log'", source);
+        Assert.Contains("Development artifacts leaked into Reactor staging", source);
+    }
+
     private static string ReadHarness(string fileName) => File.ReadAllText(Path.Combine(
         FindRepositoryRoot(),
         "src",

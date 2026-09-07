@@ -3,6 +3,9 @@
 #include "RageWebUI.Native.h"
 
 #include <MinHook.h>
+#include "HookCleanup.h"
+#include "NativeModuleLifetime.h"
+#include "NativeLifecycleLog.h"
 #include <d3d11.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -62,6 +65,7 @@ HWND inputWindow{};
 bool minHookOwned{};
 bool hooksArmed{};
 bool hookCleanupPending{};
+bool callbacksPublished{};
 std::vector<void*> createdHookAddresses;
 std::atomic_uint32_t activeHookCallbacks{};
 std::atomic_bool teardownRequested{};
@@ -766,7 +770,9 @@ bool CreateHookTracked(
         return true;
     }
     if (disposition == HookAddressDisposition::RejectRequired) return false;
-    if (MH_CreateHook(address, detour, original) != MH_OK) {
+    const auto createStatus = MH_CreateHook(address, detour, original);
+    WriteNativeLifecycle("hook_create", "MH_CreateHook", createStatus, address);
+    if (createStatus != MH_OK) {
         if (!required && original != nullptr) *original = nullptr;
         return !required;
     }
@@ -816,13 +822,38 @@ bool WaitForHookCallbacksToDrain() {
 }
 
 void FinalizeHookRemovalUnlocked() {
-    for (auto address = createdHookAddresses.rbegin();
-         address != createdHookAddresses.rend(); ++address) {
-        MH_RemoveHook(*address);
+    const auto result = TryCompleteHookCleanup(
+        createdHookAddresses, minHookOwned, callbacksPublished,
+        [](void* address) {
+            WriteNativeLifecycle("hook_disable_begin", "MH_DisableHook", 0, address);
+            const auto status = MH_DisableHook(address);
+            WriteNativeLifecycle("hook_disable", "MH_DisableHook", status, address);
+            return status == MH_OK || status == MH_ERROR_DISABLED ||
+                status == MH_ERROR_NOT_CREATED;
+        },
+        [] { return WaitForHookCallbacksToDrain(); },
+        [](void* address) {
+            const auto status = MH_RemoveHook(address);
+            WriteNativeLifecycle("hook_remove", "MH_RemoveHook", status, address);
+            return status == MH_OK || status == MH_ERROR_NOT_CREATED;
+        },
+        [] {
+            const auto status = MH_Uninitialize();
+            WriteNativeLifecycle("hook_uninitialize", "MH_Uninitialize", status);
+            return status == MH_OK || status == MH_ERROR_NOT_INITIALIZED;
+        });
+    if (result != HookCleanupResult::Complete) {
+        hookCleanupPending = true;
+        WriteNativeLifecycle("cleanup_deferred", "TryCompleteHookCleanup", static_cast<int>(result));
+        OutputDebugStringA("ReactorV: hook cleanup deferred; callback module retained.\n");
+        return;
     }
-    createdHookAddresses.clear();
-    createdHookIdentities.clear();
-    if (minHookOwned) MH_Uninitialize();
+    if (!callbacksPublished) {
+        createdHookAddresses.clear();
+        createdHookIdentities.clear();
+        minHookOwned = false;
+        ClearResolvedMethods();
+    }
 
     {
         std::scoped_lock lock(queueMutex);
@@ -836,11 +867,13 @@ void FinalizeHookRemovalUnlocked() {
     g_compositor.Reset();
     hooksArmed = false;
     hookCleanupPending = false;
-    minHookOwned = false;
-    ClearResolvedMethods();
+    WriteNativeLifecycle("cleanup_complete", callbacksPublished ? "trampolines_retained" : "unpublished_hooks_removed");
 }
 
 void RemoveHooksUnlocked() {
+    hooksArmed = false;
+    hookCleanupPending = true;
+    teardownRequested.store(true, std::memory_order_release);
     g_visible.store(false, std::memory_order_relaxed);
     g_localPresentationOwner.store(false, std::memory_order_release);
     strictEnhancedTarget.store(false, std::memory_order_release);
@@ -849,18 +882,6 @@ void RemoveHooksUnlocked() {
     g_inputQueue.Detach();
     inputWindow = nullptr;
     targetWindow.store(nullptr, std::memory_order_release);
-    teardownRequested.store(true, std::memory_order_release);
-
-    for (const auto address : createdHookAddresses) {
-        MH_DisableHook(address);
-    }
-    hooksArmed = false;
-    if (!WaitForHookCallbacksToDrain()) {
-        // Keep MinHook's trampolines and the original function pointers alive.
-        // A later Shutdown/Arm call can finalize once the stuck callback exits.
-        hookCleanupPending = true;
-        return;
-    }
     FinalizeHookRemovalUnlocked();
 }
 
@@ -869,57 +890,78 @@ void RemoveHooksUnlocked() {
 bool ArmDxgiHooks() {
     std::scoped_lock lock(lifecycleMutex);
     if (hooksArmed) return true;
+    WriteNativeLifecycle("arm_begin", "ArmDxgiHooks");
     if (hookCleanupPending) {
-        if (!WaitForHookCallbacksToDrain()) return false;
-        FinalizeHookRemovalUnlocked();
+        RemoveHooksUnlocked();
+        if (hookCleanupPending) return false;
     }
-    if (!ResolveFactoryMethods() || !ResolveDxgiMethods()) return false;
-
-    const auto initializeResult = MH_Initialize();
-    if (initializeResult != MH_OK &&
-        initializeResult != MH_ERROR_ALREADY_INITIALIZED) {
-        ClearResolvedMethods();
+    if (!RetainCallbackModuleForProcessLifetime()) {
+        WriteNativeLifecycle("arm_failed", "pin_callback_module", static_cast<int>(GetLastError()));
         return false;
     }
-    minHookOwned = initializeResult == MH_OK;
+    // No allocation may lose track of an already-created MinHook entry.
+    createdHookAddresses.reserve(6);
+    createdHookIdentities.reserve(6);
+    bool created = true;
+    if (createdHookAddresses.empty()) {
+        if (!ResolveFactoryMethods() || !ResolveDxgiMethods()) {
+            WriteNativeLifecycle("arm_failed", "resolve_dxgi_methods");
+            return false;
+        }
 
-    const bool created =
-        CreateHookTracked(
-            createSwapChainAddress,
-            reinterpret_cast<void*>(&CreateSwapChainHook),
-            reinterpret_cast<void**>(&originalCreateSwapChain),
-            true) &&
-        CreateHookTracked(
-            createSwapChainForHwndAddress,
-            reinterpret_cast<void*>(&CreateSwapChainForHwndHook),
-            reinterpret_cast<void**>(&originalCreateSwapChainForHwnd),
-            true) &&
-        CreateHookTracked(
-            presentAddress,
-            reinterpret_cast<void*>(&PresentHook),
-            reinterpret_cast<void**>(&originalPresent),
-            true) &&
-        CreateHookTracked(
-            resizeAddress,
-            reinterpret_cast<void*>(&ResizeBuffersHook),
-            reinterpret_cast<void**>(&originalResizeBuffers),
-            true) &&
-        CreateHookTracked(
-            present1Address,
-            reinterpret_cast<void*>(&Present1Hook),
-            reinterpret_cast<void**>(&originalPresent1),
-            true) &&
-        CreateHookTracked(
-            resize1Address,
-            reinterpret_cast<void*>(&ResizeBuffers1Hook),
-            reinterpret_cast<void**>(&originalResizeBuffers1),
-            true);
+        const auto initializeResult = MH_Initialize();
+        WriteNativeLifecycle("hook_initialize", "MH_Initialize", initializeResult);
+        if (initializeResult != MH_OK &&
+            initializeResult != MH_ERROR_ALREADY_INITIALIZED) {
+            ClearResolvedMethods();
+            return false;
+        }
+        minHookOwned = initializeResult == MH_OK;
+
+        created =
+            CreateHookTracked(
+                createSwapChainAddress,
+                reinterpret_cast<void*>(&CreateSwapChainHook),
+                reinterpret_cast<void**>(&originalCreateSwapChain),
+                true) &&
+            CreateHookTracked(
+                createSwapChainForHwndAddress,
+                reinterpret_cast<void*>(&CreateSwapChainForHwndHook),
+                reinterpret_cast<void**>(&originalCreateSwapChainForHwnd),
+                true) &&
+            CreateHookTracked(
+                presentAddress,
+                reinterpret_cast<void*>(&PresentHook),
+                reinterpret_cast<void**>(&originalPresent),
+                true) &&
+            CreateHookTracked(
+                resizeAddress,
+                reinterpret_cast<void*>(&ResizeBuffersHook),
+                reinterpret_cast<void**>(&originalResizeBuffers),
+                true) &&
+            CreateHookTracked(
+                present1Address,
+                reinterpret_cast<void*>(&Present1Hook),
+                reinterpret_cast<void**>(&originalPresent1),
+                true) &&
+            CreateHookTracked(
+                resize1Address,
+                reinterpret_cast<void*>(&ResizeBuffers1Hook),
+                reinterpret_cast<void**>(&originalResizeBuffers1),
+                true);
+    }
 
     teardownRequested.store(false, std::memory_order_release);
     bool enabled = created;
     if (enabled) {
+        // Set before enabling: another thread can enter as soon as MinHook
+        // publishes the branch, including when a later enable fails.
+        callbacksPublished = true;
         for (const auto address : createdHookAddresses) {
-            if (MH_EnableHook(address) != MH_OK) {
+            WriteNativeLifecycle("hook_enable_begin", "MH_EnableHook", 0, address);
+            const auto enableStatus = MH_EnableHook(address);
+            WriteNativeLifecycle("hook_enable", "MH_EnableHook", enableStatus, address);
+            if (enableStatus != MH_OK) {
                 enabled = false;
                 break;
             }
@@ -935,6 +977,7 @@ bool ArmDxgiHooks() {
     // Failure is fail-open: the existing CPU mailbox remains available.
     g_compositor.ArmSharedFrameConsumer();
     hooksArmed = true;
+    WriteNativeLifecycle("arm_complete", "ArmDxgiHooks");
     return true;
 }
 
@@ -1182,7 +1225,9 @@ RWUI_API std::int32_t RWUI_CALL RWUI_ArmEnhancedHook() {
     try {
         return rwui::ArmDxgiHooks() ? 1 : 0;
     } catch (...) {
+        rwui::WriteNativeLifecycle("arm_exception", "RWUI_ArmEnhancedHook");
         rwui::g_inputQueue.SetCapture(false);
+        try { rwui::RemoveHooks(); } catch (...) { }
         return 0;
     }
 }
@@ -1191,7 +1236,9 @@ RWUI_API std::int32_t RWUI_CALL RWUI_ArmLegacyHook() {
     try {
         return rwui::ArmDxgiHooks() ? 1 : 0;
     } catch (...) {
+        rwui::WriteNativeLifecycle("arm_exception", "RWUI_ArmLegacyHook");
         rwui::g_inputQueue.SetCapture(false);
+        try { rwui::RemoveHooks(); } catch (...) { }
         return 0;
     }
 }

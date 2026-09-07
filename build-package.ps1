@@ -126,13 +126,13 @@ $harnessReportName = if ($IncludeExperimentalEnhancedRenderHook) {
     'reactor-harness-report.developer.json'
 }
 $archiveName = if ($IncludeExperimentalEnhancedRenderHook) {
-    'ReactorV-0.2.0-enhanced-live-test.zip'
+    'ReactorV-0.2.1-enhanced-live-test.zip'
 } elseif ($IncludeExperimentalLegacyRenderHook) {
-    'ReactorV-0.2.0-legacy-live-test.zip'
+    'ReactorV-0.2.1-legacy-live-test.zip'
 } elseif ($releaseEligible) {
-    'ReactorV-0.2.0.zip'
+    'ReactorV-0.2.1.zip'
 } else {
-    'ReactorV-0.2.0-developer.zip'
+    'ReactorV-0.2.1-developer.zip'
 }
 $harnessReportPath = Join-Path $artifactsRoot "harness\$harnessReportName"
 $nativeCTestReportPath = Join-Path $artifactsRoot "harness\native-ctest.$artifactKind.junit.xml"
@@ -2069,12 +2069,25 @@ foreach ($harnessFile in @(
     }
 }
 
+# Native lifecycle telemetry is relative to the host executable. Packaged
+# harnesses therefore write beneath rendererRoot, not the game root. Preserve
+# only these known test outputs outside staging; the leak scan remains strict
+# for all other logs and developer files.
+foreach ($nativeTestLogName in @('ReactorV.NativeLifecycle.log', 'ReactorV.NativeLifecycle.log.1')) {
+    $nativeTestLog = Join-Path $rendererRoot "scripts\ReactorV\$nativeTestLogName"
+    if (Test-Path -LiteralPath $nativeTestLog -PathType Leaf) {
+        $nativeTestLogReport = Join-Path $artifactsRoot "harness\$artifactKind.$nativeTestLogName"
+        Move-Item -LiteralPath $nativeTestLog -Destination $nativeTestLogReport -Force
+    }
+}
+
 $unexpectedPackagedArtifacts = @(
     Get-ChildItem -LiteralPath $stagingRoot -Force -Recurse |
         Where-Object {
             ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
             (-not $_.PSIsContainer -and (
                 $_.Name -like '*Harness*' -or
+                $_.Name -like '*.log.*' -or
                 $_.Name -match '(?i)allin1|gbay' -or
                 $_.Extension -in @('.map', '.pdb', '.log', '.tmp', '.rpf', '.ytd', '.ydr', '.yft', '.meta')
             )) -or
@@ -2393,5 +2406,5 @@ Write-Host "SHA-256: $hash"
 Write-Host "Package budgets PASS: staging=$stagingBytes bytes, archive=$archiveBytes bytes"
 Write-Host "Harness report: $harnessReportPath"
 if (-not $releaseEligible) {
-    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.0.zip or its release receipt."
+    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.1.zip or its release receipt."
 }

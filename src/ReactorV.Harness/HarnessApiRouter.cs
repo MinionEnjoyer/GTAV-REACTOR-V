@@ -307,7 +307,7 @@ namespace RageWebUI.Harness
             ["supportedApiVersions"] = new JArray(1, 2),
             ["sessionId"] = StartupTrace.SessionId,
             ["runtime"] = "DirectX harness",
-            ["runtimeVersion"] = "0.2.0",
+            ["runtimeVersion"] = "0.2.1",
             ["renderer"] = "Native test surface",
             ["edition"] = "Enhanced",
             ["extensionApiVersion"] = ReactorApi.ExtensionApiVersion,

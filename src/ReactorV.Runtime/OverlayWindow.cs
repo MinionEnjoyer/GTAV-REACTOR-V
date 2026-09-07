@@ -443,6 +443,14 @@ namespace RageWebUI.Runtime
 
         public int AcceptanceCaptureControllerGeneration => _controllerGeneration;
 
+        // Called on the overlay STA. Retention is proof of the current provider
+        // paint, not merely a visible HWND or an earlier provider's commit.
+        public bool HasVisibleCommittedProviderPresentation(string? presentationId) =>
+            _actualVisible && _desiredVisible &&
+            ProviderPresentationCommitContract.Matches(_activeMenuPresentationId, presentationId) &&
+            ProviderPresentationCommitContract.Matches(_acceptedMenuPresentationId, presentationId) &&
+            ProviderPresentationCommitContract.Matches(_committedProviderInputPresentationId, presentationId);
+
         /// <summary>
         /// Publishes a cancellation edge before a cross-thread visibility or
         /// ownership mutation is queued to this window's STA. DirectComposition

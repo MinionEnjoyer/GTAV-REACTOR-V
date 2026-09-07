@@ -262,6 +262,10 @@ namespace RageWebUI.Harness
                     TimeSpan.FromSeconds(2))
                 : SurfaceObservation.Failed;
 
+            var setupFocusDismissalBaseline = ReadLog(preloaderLog).LastIndexOf(
+                "stage=webview_visibility_dismissed reason=game_not_foreground",
+                StringComparison.Ordinal);
+
             // The former preloader released its controller and browser as soon
             // as the page warmed. Delaying provider attachment beyond that old
             // release window turns the regression into a deterministic failure.
@@ -298,6 +302,12 @@ namespace RageWebUI.Harness
                 proxy = (SecondaryAppDomainHarnessProxy)domain.CreateInstanceAndUnwrap(
                     Assembly.GetExecutingAssembly().FullName,
                     typeof(SecondaryAppDomainHarnessProxy).FullName);
+                // AppDomain/assembly loading can let Explorer take focus. Only
+                // recover the setup before provider ownership starts, and only
+                // when a recorded focus loss explains the hidden initializer.
+                if (!PrepareInitializerForProvider(host, visualCapture, preloaderLog,
+                        setupFocusDismissalBaseline, localDataDirectory, processId))
+                    return 5;
                 var started = proxy.StartForBootstrapGbayHandoff(
                     host.Handle,
                     uiDirectory,
@@ -315,7 +325,10 @@ namespace RageWebUI.Harness
                 {
                     Application.DoEvents();
                     if (!WindowProbe.IsForegroundOrOwnedBy(host.Handle))
-                        WindowProbe.EnsureForeground(host.Handle, TimeSpan.FromMilliseconds(250));
+                    {
+                        Console.Error.WriteLine("HARNESS ENVIRONMENT: focus lost after provider attachment; handoff not qualified.");
+                        return 5;
+                    }
                     requests = proxy.Pump();
                     if (requests >= 2 && proxy.GbaySubscriptionCount >= 1 &&
                         proxy.GbayStartupStatusRequestCount >= 1) break;
@@ -1172,6 +1185,41 @@ namespace RageWebUI.Harness
                     ? TrySignalNamedEvent(BootstrapHostNames.ToggleEvent(processId))
                     : string.Equals(route, "verifying", StringComparison.Ordinal) &&
                         TrySignalNamedEvent(BootstrapHostNames.VerifyToggleEvent(processId));
+
+        private static bool PrepareInitializerForProvider(
+            Form host, HarnessVisualCaptureSession visualCapture, string preloaderLog,
+            int focusDismissalBaseline, string localDataDirectory, int processId)
+        {
+            const string dismissal = "stage=webview_visibility_dismissed reason=game_not_foreground";
+            var focusLost = !WindowProbe.IsForegroundOrOwnedBy(host.Handle) ||
+                ReadLog(preloaderLog).LastIndexOf(dismissal, StringComparison.Ordinal) > focusDismissalBaseline;
+            if (!WindowProbe.EnsureForeground(host.Handle, TimeSpan.FromMilliseconds(750)))
+            {
+                Console.Error.WriteLine("HARNESS ENVIRONMENT: could not restore focus before provider attachment.");
+                return false;
+            }
+            Application.DoEvents();
+            if (!WindowProbe.IsVisibleAnyProcess(OverlayWindowTitle))
+            {
+                // Never paper over an unexplained runtime hide, and never
+                // synthesize a global keypress. Toggle the process-scoped test
+                // boundary once, before the measured handoff starts.
+                if (!focusLost || !TrySignalNamedEvent(BootstrapHostNames.ToggleEvent(processId)))
+                {
+                    Console.Error.WriteLine("HARNESS FAIL: initializer hidden before provider attachment without recoverable focus loss.");
+                    return false;
+                }
+                Console.WriteLine("HARNESS SETUP: restored initializer after recorded desktop focus loss; requalifying pixels before provider attachment.");
+            }
+            var observation = WaitForStartupSurface(host, visualCapture,
+                Path.Combine(localDataDirectory, "pre-provider-initializer.png"),
+                () => { }, TimeSpan.FromSeconds(2));
+            var ready = observation.Qualified && observation.SinglePopup &&
+                WindowProbe.IsForegroundOrOwnedBy(host.Handle) &&
+                PreloadHandoff.IsDefaultMenuIntentActive(processId);
+            Console.WriteLine($"HARNESS SETUP: preProviderInitializerQualified={ready} priorFocusLoss={focusLost}");
+            return ready;
+        }
 
         private static bool WaitForVisibleWithForeground(Form host, TimeSpan timeout)
         {
