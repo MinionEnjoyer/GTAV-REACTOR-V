@@ -101,6 +101,35 @@ public sealed class BootstrapHarnessPresentationSourceContractTests
         Assert.True(success > stableGate);
     }
 
+    [Fact]
+    public void Focus_recovery_is_before_provider_attachment_and_requalifies_pixels()
+    {
+        var source = ReadHarness("BootstrapHostHarness.cs");
+        Assert.True(source.IndexOf("if (!PrepareInitializerForProvider(", StringComparison.Ordinal) <
+            source.IndexOf("var started = proxy.StartForBootstrapGbayHandoff(", StringComparison.Ordinal));
+        var prepare = MethodRegion(source, "private static bool PrepareInitializerForProvider(",
+            "private static bool WaitForVisibleWithForeground(");
+        Assert.Contains("stage=webview_visibility_dismissed reason=game_not_foreground", prepare);
+        Assert.Contains("if (!focusLost || !TrySignalNamedEvent", prepare);
+        Assert.Contains("WaitForStartupSurface(host, visualCapture,", prepare);
+        Assert.Contains("observation.Qualified && observation.SinglePopup", prepare);
+        Assert.Contains("PreloadHandoff.IsDefaultMenuIntentActive(processId)", prepare);
+        Assert.Contains("focus lost after provider attachment; handoff not qualified", source);
+        // Keep the visual gate strict even when the test desktop interferes.
+        Assert.Contains("noTransparent &= frame.ChangedFraction > 0.10d;", source);
+    }
+
+    [Fact]
+    public void Retained_webview_proof_requires_current_visible_accepted_and_committed_identity()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ReactorV.Runtime", "OverlayWindow.cs"));
+        var proof = MethodRegion(source, "public bool HasVisibleCommittedProviderPresentation(", "public void SignalRevealIngress()");
+        Assert.Contains("_actualVisible && _desiredVisible", proof);
+        Assert.Contains("Matches(_activeMenuPresentationId, presentationId)", proof);
+        Assert.Contains("Matches(_acceptedMenuPresentationId, presentationId)", proof);
+        Assert.Contains("Matches(_committedProviderInputPresentationId, presentationId)", proof);
+    }
+
     private static string ReadHarness(string fileName) => File.ReadAllText(Path.Combine(
         FindRepositoryRoot(),
         "src",

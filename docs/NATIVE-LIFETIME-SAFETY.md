@@ -85,3 +85,19 @@ and hiding were recorded. GTA and the preloader exited with code 0, and browser
 disposal completed. This did not exercise failure/deferred native cleanup or
 reproduce the other user's crash, and the versioned full packages require their
 own live comparison.
+
+## Package-harness corrections
+
+The first 0.2.1 package attempt exposed a race in the synthetic WebView presenter:
+logical bootstrap retirement selected no presenter while the non-presenting GPU
+shadow refreshed, briefly hiding an already-committed provider menu. The explicit
+harness route now retains only visible, accepted and committed pixels matching
+the current presentation and provider session. Cold reveals still require GPU
+readiness; production native presentation, hide/disconnect handling and visual
+thresholds are unchanged.
+
+A second attempt lost desktop focus to Explorer during setup. Before provider
+attachment the harness now rechecks focus and initializer pixels. It can reissue
+the process-scoped show intent only when focus loss explains a hidden window;
+an unexplained hide fails. Focus loss during provider attachment is reported as
+an environment failure rather than a cascade of menu-readiness failures.

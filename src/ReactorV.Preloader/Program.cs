@@ -3286,13 +3286,11 @@ namespace ReactorV.Preloader
                     _options.ExternalGpuBrowserShadow &&
                     !_options.BootstrapHarnessWebViewPresenter,
                 requireNativePresenter: _requireNativePresenter);
-            if (_options.BootstrapHarnessWebViewPresenter &&
-                visible && externalGpuActive && externalGpuPresentationReady &&
-                _hostServer?.IsConnected == true &&
-                string.Equals(
-                    HostSurfaceMode.Normalize(_hostSurfaceMode),
-                    HostSurfaceMode.None,
-                    StringComparison.Ordinal))
+            if (BootstrapHarnessPresentationPolicy.UseWebView(
+                _options.BootstrapHarnessWebViewPresenter, visible, providerConnected,
+                _hostSurfaceMode, externalGpuActive, externalGpuPresentationReady,
+                _dualBrowserReadyProviderSessionGeneration == Volatile.Read(ref _providerSessionGeneration) &&
+                window.HasVisibleCommittedProviderPresentation(_dualBrowserReadyPresentationId)))
             {
                 // The packaged bootstrap-host visual harness observes the
                 // integrated WebView HWND. Keep external CEF alive as the
@@ -3301,6 +3299,9 @@ namespace ReactorV.Preloader
                 // synthetic-host-only run. Production never passes this
                 // command-line switch and therefore retains exclusive native
                 // presentation for connected provider menus.
+                // Keep current, committed WebView pixels during a shadow
+                // refresh; otherwise logical retirement hides the actual
+                // presenter while its non-presenting shadow catches up.
                 decision = new BrowserPresentationDecision(
                     BrowserPresentationOwner.WebViewBootstrap,
                     webViewVisible: true,
