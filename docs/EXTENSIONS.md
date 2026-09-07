@@ -18,6 +18,21 @@ This is the intended split:
 
 ## Register from a GTA script
 
+### Preserving a consumer browser UI during runtime updates
+
+The live-test installer preserves a complete consumer-owned `plugins/ReactorV/ui`
+directory, including its entrypoint, branding, scripts and styles, when its
+`reactor-ui.json` declares `schema_version: 1`, `contains_consumer_content: true`,
+an `owner` token and a `<name>-composition` profile. Owner/profile tokens use
+lowercase letters, digits, dots and hyphens, starting with a letter or digit.
+This is an ownership boundary, not runtime compatibility certification.
+
+The installer snapshots and hash-verifies this UI along with extension assets;
+native runtime binaries still update. The consumer's own installer is responsible
+for upgrading its UI as a coherent build. Neutral `reactor-runtime` UI remains
+runtime-owned and is replaced normally. Invalid or unknown UI identity markers
+stop the update before mutation rather than silently resetting the consumer UI.
+
 ### Standalone starter prefabs
 
 `examples/ReactorV.StandaloneStarter` contains complete, independently compiled

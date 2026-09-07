@@ -169,6 +169,26 @@ function New-ReactorVPreservedEntry {
     }
 }
 
+function Test-ReactorVConsumerUi {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Files)
+
+    $marker = @($Files | Where-Object { $_.RelativePath -ieq 'ui/reactor-ui.json' })
+    if ($marker.Count -eq 0) { return $false }
+    try {
+        $identity = Get-Content -LiteralPath $marker[0].FullName -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($identity.schema_version -ne 1 -or
+            $identity.contains_consumer_content -isnot [bool]) { throw 'Invalid UI identity' }
+        if ($identity.profile -ceq 'reactor-runtime' -and
+            -not $identity.contains_consumer_content) { return $false }
+        if ($identity.contains_consumer_content -and
+            $identity.profile -cmatch '^[a-z0-9][a-z0-9.-]*-composition$' -and
+            $identity.owner -cmatch '^[a-z0-9][a-z0-9.-]*$') { return $true }
+        throw 'Unknown UI identity'
+    } catch {
+        throw 'The existing Reactor UI ownership marker is invalid or unsupported. Resolve its ownership before updating Reactor V.'
+    }
+}
+
 function Get-ReactorVPreservedFileManifest {
     [CmdletBinding()]
     param(
@@ -182,6 +202,10 @@ function Get-ReactorVPreservedFileManifest {
     $existingPluginFiles = @(Get-ReactorVRelativeFiles -Root $ExistingPluginRoot)
     $incomingScriptFiles = @(Get-ReactorVRelativeFiles -Root $IncomingScriptRoot)
     $incomingPluginFiles = @(Get-ReactorVRelativeFiles -Root $IncomingPluginRoot)
+    # A consumer composition owns the complete browser entrypoint and its assets,
+    # not just namespaced artwork. Replacing index.html alone selects the neutral
+    # runtime UI and silently loses branding, stable service rows, menus and HUDs.
+    $preserveConsumerUi = Test-ReactorVConsumerUi -Files $existingPluginFiles
 
     $incomingScripts = [Collections.Generic.HashSet[string]]::new(
         [StringComparer]::OrdinalIgnoreCase)
@@ -248,6 +272,10 @@ function Get-ReactorVPreservedFileManifest {
     }
     foreach ($file in $existingPluginFiles) {
         $relative = [string]$file.RelativePath
+        if ($preserveConsumerUi -and $relative.StartsWith('ui/', [StringComparison]::OrdinalIgnoreCase)) {
+            $entries.Add((New-ReactorVPreservedEntry -Scope 'Plugin' -File $file))
+            continue
+        }
         if ($relative.Equals(
                 'ReactorV.Preloader.json',
                 [StringComparison]::OrdinalIgnoreCase)) {

@@ -75,7 +75,7 @@ try {
     Write-FixtureText (Join-Path $incomingScript 'RageWebUI.Script.dll') 'new-core'
     Write-FixtureText (Join-Path $incomingScript 'ReactorV.contract.json') 'new-contract'
     Write-FixtureText (Join-Path $incomingPlugin 'libcef.dll') 'new-cef'
-    Write-FixtureText (Join-Path $incomingPlugin 'ReactorV.Preloader.json') 'new-preloader-settings'
+    Write-FixtureText (Join-Path $incomingPlugin 'ReactorV.Preloader.json') '{"externalGpuBrowserShadow":false,"externalGpuFrameRate":30}'
     Write-FixtureText (Join-Path $incomingPlugin 'ReactorV.EnhancedLiveTest.json') 'new-edition-marker'
     Write-FixtureText (Join-Path $incomingPlugin 'ui\assets\app-new.js') 'new-ui'
 
@@ -210,7 +210,52 @@ try {
         $invalidPreloaderRejected `
         'An invalid preloader configuration was silently preserved or overwritten.'
 
-    "OWNERSHIP_FILESYSTEM_PASS files=$($manifest.Count)"
+    # Consumer entrypoint, logo, hashed chunks and identity must survive a neutral
+    # runtime upgrade together. Native binaries must still update normally.
+    $consumerPlugin = Join-Path $testRoot 'consumer/plugins/ReactorV'
+    $consumerBackup = Join-Path $testRoot 'consumer-backup/Plugin-ReactorV'
+    $consumerTarget = Join-Path $testRoot 'consumer-target/plugins/ReactorV'
+    Copy-FixtureTree $existingPlugin $consumerPlugin
+    Write-FixtureText (Join-Path $consumerPlugin 'ui/reactor-ui.json') '{"schema_version":1,"profile":"partner-composition","owner":"partner","contains_consumer_content":true}'
+    Write-FixtureText (Join-Path $consumerPlugin 'ui/index.html') '<script src="assets/app-old.js"></script>'
+    Write-FixtureText (Join-Path $consumerPlugin 'ui/partner-logo.png') 'consumer-logo'
+    Write-FixtureText (Join-Path $consumerPlugin 'ui/assets/app-old.css') 'consumer-style'
+    Write-FixtureText (Join-Path $incomingPlugin 'ui/index.html') '<script src="assets/app-new.js"></script>'
+    Write-FixtureText (Join-Path $incomingPlugin 'ui/reactor-ui.json') '{"schema_version":1,"profile":"reactor-runtime","contains_consumer_content":false}'
+    $consumerManifest = @(Get-ReactorVPreservedFileManifest `
+        -ExistingScriptRoot $existingScript -ExistingPluginRoot $consumerPlugin `
+        -IncomingScriptRoot $incomingScript -IncomingPluginRoot $incomingPlugin)
+    $emptyManifest = @(Get-ReactorVPreservedFileManifest `
+        -ExistingScriptRoot (Join-Path $testRoot 'missing-script') `
+        -ExistingPluginRoot (Join-Path $testRoot 'missing-plugin') `
+        -IncomingScriptRoot $incomingScript -IncomingPluginRoot $incomingPlugin)
+    Assert-OwnershipTest ($emptyManifest.Count -eq 0) 'Fresh install unexpectedly preserved UI content.'
+    $neutralManifest = @(Get-ReactorVPreservedFileManifest `
+        -ExistingScriptRoot $incomingScript -ExistingPluginRoot $incomingPlugin `
+        -IncomingScriptRoot $incomingScript -IncomingPluginRoot $incomingPlugin)
+    Assert-OwnershipTest (@($neutralManifest | Where-Object { $_.RelativePath -eq 'ui/index.html' }).Count -eq 0) 'Neutral UI was incorrectly frozen during upgrade.'
+    $consumerPaths = @($consumerManifest | Where-Object Scope -eq 'Plugin' | ForEach-Object RelativePath)
+    foreach ($relative in @('ui/index.html','ui/reactor-ui.json','ui/partner-logo.png','ui/assets/app-old.js','ui/assets/app-old.css')) {
+        Assert-OwnershipTest ($consumerPaths -contains $relative) "Consumer UI not preserved: $relative"
+    }
+    Assert-OwnershipTest ($consumerPaths -notcontains 'libcef.dll') 'Consumer ownership must not capture native runtime files.'
+    Copy-FixtureTree $consumerPlugin $consumerBackup
+    Copy-FixtureTree $incomingPlugin $consumerTarget
+    Restore-ReactorVPreservedFiles -Manifest $consumerManifest `
+        -BackupScriptRoot $backupScript -BackupPluginRoot $consumerBackup `
+        -TargetScriptRoot $targetScript -TargetPluginRoot $consumerTarget
+    Assert-OwnershipTest (Test-ReactorVPreservedFileManifest -Manifest $consumerManifest `
+        -TargetScriptRoot $targetScript -TargetPluginRoot $consumerTarget) 'Consumer UI restore did not verify.'
+    Assert-OwnershipTest ([IO.File]::ReadAllText((Join-Path $consumerTarget 'libcef.dll')) -ceq 'new-cef') 'Consumer UI preservation blocked runtime upgrade.'
+    Write-FixtureText (Join-Path $consumerPlugin 'ui/reactor-ui.json') '{"schema_version":1,"profile":"partner-composition","contains_consumer_content":true}'
+    $invalidUiRejected = $false
+    try {
+        [void]@(Get-ReactorVPreservedFileManifest -ExistingScriptRoot $existingScript `
+            -ExistingPluginRoot $consumerPlugin -IncomingScriptRoot $incomingScript -IncomingPluginRoot $incomingPlugin)
+    } catch { $invalidUiRejected = $_.Exception.Message -like '*UI ownership marker*' }
+    Assert-OwnershipTest $invalidUiRejected 'Invalid consumer identity was silently replaced.'
+
+    "OWNERSHIP_FILESYSTEM_PASS files=$($manifest.Count) consumerFiles=$($consumerManifest.Count)"
 } finally {
     if (Test-Path -LiteralPath $resolvedTest) {
         Remove-Item -LiteralPath $resolvedTest -Recurse -Force
