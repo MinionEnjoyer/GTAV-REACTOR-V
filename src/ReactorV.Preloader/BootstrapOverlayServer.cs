@@ -346,6 +346,7 @@ namespace ReactorV.Preloader
                     var mode = HostSurfaceMode.Normalize(local.Value<string>("mode"));
                     var generation = local.Value<int?>("generation") ?? 0;
                     if ((string.Equals(mode, "about", StringComparison.Ordinal) ||
+                         string.Equals(mode, HostSurfaceMode.PassiveHud, StringComparison.Ordinal) ||
                          string.Equals(mode, HostSurfaceMode.Verifying, StringComparison.Ordinal) ||
                          string.Equals(mode, HostSurfaceMode.SetupStatus, StringComparison.Ordinal) ||
                          string.Equals(mode, "initializing", StringComparison.Ordinal)) &&

@@ -379,6 +379,9 @@ namespace ReactorV.Preloader
                             epoch));
                 _hostServer.VisibilityRequested += (visible, reason) => InvokeHost(window =>
                 {
+                    // Passive HUD visibility is owned by its generation-bound host paint gate.
+                    // A following generic provider show must not cancel that pending gate.
+                    if (visible && _hostSurfaceMode == HostSurfaceMode.PassiveHud) return;
                     if (!visible)
                     {
                         RetireExternalProviderProof(
@@ -443,6 +446,15 @@ namespace ReactorV.Preloader
                         "external-surface-ready"));
                 _hostServer.JsonRequested += json => InvokeHost(window =>
                 {
+                    var message = JObject.Parse(json);
+                    if (message.Value<string>("event") == "host.surface" &&
+                        message["payload"]?.Value<string>("mode") == HostSurfaceMode.PassiveHud)
+                    {
+                        if (_hostServer.IsConnected && (_hostSurfaceMode == HostSurfaceMode.None ||
+                            _hostSurfaceMode == HostSurfaceMode.PassiveHud))
+                            RequestHostSurface(window, HostSurfaceMode.PassiveHud, true);
+                        return;
+                    }
                     PostBrowserJson(window, json);
                 }, hostMessageIngress: json);
                 _hostServer.PointerRequested += (x, y, pressed, released, wheel) =>
@@ -471,6 +483,8 @@ namespace ReactorV.Preloader
                 }, signalRevealIngress: true);
                 _hostServer.ProviderDisconnected += () => InvokeHost(window =>
                 {
+                    if (_hostSurfaceMode == HostSurfaceMode.PassiveHud)
+                        RetireBootstrapSurface(window, hide: true);
                     var disconnectedOwner = _browserPresentation.Owner;
                     var externalSession = _externalGpuBrowserSession;
                     var retainedProviderPromotionInFlight =
@@ -2468,7 +2482,7 @@ namespace ReactorV.Preloader
             string mode,
             string? handoff = null)
         {
-            _hostSurfaceMode = string.Equals(mode, "about", StringComparison.Ordinal)
+            _hostSurfaceMode = mode == HostSurfaceMode.PassiveHud ? HostSurfaceMode.PassiveHud : string.Equals(mode, "about", StringComparison.Ordinal)
                 ? "about"
                 : string.Equals(mode, HostSurfaceMode.Verifying, StringComparison.Ordinal)
                     ? HostSurfaceMode.Verifying

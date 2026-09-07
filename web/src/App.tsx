@@ -30,6 +30,7 @@ import { ReactorAboutSurface } from './menu/ReactorAboutSurface'
 import { StartupTransitionSurface } from './menu/StartupTransitionSurface'
 import { parseMenuDismissal, parseMenuPresentation, type MenuPresentation } from './menu/presentation'
 import { resolveVisiblePaintIdentity } from './paintIdentity'
+import { Speedometer, useSpeedometer } from './hud/Speedometer'
 import {
   createStartupFallbackStatus,
   parseStartupStatus,
@@ -59,6 +60,7 @@ const initialBrowserRole = browserRoleFromLocation(
 function App() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
   const [telemetry, setTelemetry] = useState<GameState | null>(null)
+  const speedometer = useSpeedometer(bridge)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [presentation, setPresentation] = useState<MenuPresentation | null>(null)
@@ -653,7 +655,7 @@ function App() {
     if (!bridge.isNative || !canAcknowledgeSurface || committedPresentation !== null ||
       hostSurfaceGeneration <= 0 ||
       (surfaceView !== 'about' && surfaceView !== 'verifying' &&
-        surfaceView !== 'setup-status' && surfaceView !== 'initializing')) return
+        surfaceView !== 'setup-status' && surfaceView !== 'initializing' && surfaceView !== 'passive-hud')) return
     let active = true
     const publishReady = async () => {
       // A staged GBAY tree can contain a large artwork catalog. Prepare those
@@ -868,6 +870,10 @@ function App() {
         />
       </>
     )
+  }
+
+  if (surfaceView === 'passive-hud') {
+    return <><PaintIdentityMarker identity={visiblePaintIdentity} />{speedometer && <Speedometer frame={speedometer} />}</>
   }
 
   if (surfaceView === 'transparent') {

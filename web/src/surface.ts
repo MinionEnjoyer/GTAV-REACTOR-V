@@ -1,6 +1,6 @@
-export type HostSurfaceMode = 'none' | 'about' | 'verifying' | 'setup-status' | 'initializing'
+export type HostSurfaceMode = 'none' | 'about' | 'verifying' | 'setup-status' | 'initializing' | 'passive-hud'
 export type HostSurfaceHandoff = 'presentation'
-export type SurfaceView = 'transparent' | 'about' | 'verifying' | 'setup-status' | 'initializing' | 'presentation'
+export type SurfaceView = 'transparent' | 'about' | 'verifying' | 'setup-status' | 'initializing' | 'presentation' | 'passive-hud'
 
 export interface HostSurfaceDescriptor {
   mode: HostSurfaceMode
@@ -46,7 +46,7 @@ export function parseHostSurface(value: unknown): HostSurfaceDescriptor | null {
     : typeof value === 'object' && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>).mode
       : undefined
-  if (mode !== 'none' && mode !== 'about' && mode !== 'verifying' && mode !== 'setup-status' && mode !== 'initializing') return null
+  if (mode !== 'none' && mode !== 'about' && mode !== 'verifying' && mode !== 'setup-status' && mode !== 'initializing' && mode !== 'passive-hud') return null
   if (typeof value === 'string') return { mode }
   const record = value as Record<string, unknown>
   if (record.handoff !== undefined && record.handoff !== 'presentation') return null
@@ -94,7 +94,7 @@ export function parseProviderConnected(value: unknown): boolean | null {
  * route/focus state during an authoritative refresh.
  */
 export function hostSurfaceSupersedesPresentation(mode: HostSurfaceMode): boolean {
-  return mode !== 'none'
+  return mode !== 'none' && mode !== 'passive-hud'
 }
 
 /**
@@ -120,7 +120,7 @@ export function shouldRetireBootstrapAfterAcceptance(
   currentMode: HostSurfaceMode,
   deferredNoneBoundary: boolean,
 ): boolean {
-  return currentMode === 'initializing' || deferredNoneBoundary
+  return currentMode === 'initializing' || currentMode === 'passive-hud' || deferredNoneBoundary
 }
 
 /** Presentation ownership wins only after a fresh presentation event. */

@@ -218,7 +218,8 @@ namespace RageWebUI.Core
         }
 
         public static bool IsNativeBootstrapSurface(string? mode, bool includeInteractiveBootstrap) =>
-            HostSurfaceMode.IsInitializing(mode) || (includeInteractiveBootstrap && HostSurfaceMode.RequiresPaintProof(mode));
+            HostSurfaceMode.IsInitializing(mode) || mode == HostSurfaceMode.PassiveHud ||
+            (includeInteractiveBootstrap && HostSurfaceMode.RequiresPaintProof(mode));
     }
 
     /// <summary>

@@ -280,7 +280,7 @@ export class GtaBridge {
   }
 
   /** Confirm that React committed the exact bootstrap surface generation. */
-  markHostSurfaceReady(mode: 'about' | 'verifying' | 'setup-status' | 'initializing', generation: number): void {
+  markHostSurfaceReady(mode: 'about' | 'verifying' | 'setup-status' | 'initializing' | 'passive-hud', generation: number): void {
     if (this.destroyed) {
       throw new GtaBridgeError('disposed', 'The GTA bridge was disposed.')
     }

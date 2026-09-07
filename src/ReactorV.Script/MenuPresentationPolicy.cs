@@ -56,7 +56,7 @@ namespace RageWebUI.Script
             bool matchingPresentationReady,
             string? currentHostSurface) =>
             matchingPresentationReady &&
-            HostSurfaceMode.IsInitializing(currentHostSurface);
+            (HostSurfaceMode.IsInitializing(currentHostSurface) || currentHostSurface == HostSurfaceMode.PassiveHud);
 
         internal static bool RequiresHideBeforeDispatch(
             bool overlayRequestedVisible,

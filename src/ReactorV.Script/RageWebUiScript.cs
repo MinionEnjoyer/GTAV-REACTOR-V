@@ -39,6 +39,9 @@ namespace RageWebUI.Script
         private readonly ProviderPresentationCommitGate
             _providerPresentationCommitGate = new ProviderPresentationCommitGate();
         private readonly MenuInputLease _menuInputLease = new MenuInputLease();
+        private readonly PassiveHudLease _passiveHud = new PassiveHudLease();
+        private bool _passiveHudVisible;
+        private long _nextPassiveHudFrame;
         private readonly ManagedPointerButtonPolicy _pointerButtonPolicy =
             new ManagedPointerButtonPolicy();
         private readonly IntPtr _gtaWindow;
@@ -236,6 +239,7 @@ namespace RageWebUI.Script
             }
             TryAdvancePendingProviderPresentation(scriptElapsedMilliseconds);
             DrainExtensionEvents();
+            UpdatePassiveHud(scriptElapsedMilliseconds);
             while (_router.TryDequeueReplayEvent(out var replayName, out var replayPayload))
             {
                 if (replayName != null)
@@ -474,7 +478,7 @@ namespace RageWebUI.Script
                 _inputMode = MenuPresentationPolicy.InitialInputMode;
                 ShowOverlay("toggle");
             }
-            else if (args.KeyCode == Keys.Escape && _overlay.IsVisible)
+            else if (args.KeyCode == Keys.Escape && _overlay.IsVisible && !_passiveHudVisible)
             {
                 if (!string.IsNullOrWhiteSpace(
                         _userIntentFallbackPresentationId))
@@ -1352,10 +1356,65 @@ namespace RageWebUI.Script
                     continue;
                 }
                 var payload = record["payload"];
+                if (record.Value<string>("eventId") == PassiveHudContract.EventId)
+                {
+                    string? owner = record.Value<string>("extensionId");
+                    if (owner != null && ReactorHostApi.ExtensionHasCapability(owner, PassiveHudContract.Capability)
+                        && DateTime.TryParse(record.Value<string>("timestampUtc"), out var publishedAt)
+                        && (DateTime.UtcNow - publishedAt.ToUniversalTime()).TotalMilliseconds < PassiveHudContract.LeaseMilliseconds
+                        && payload is JObject hud)
+                        _passiveHud.Accept(owner, hud, _scriptTimer.ElapsedMilliseconds);
+                    continue;
+                }
                 if (_router.ShouldPublishEvent(eventName, payload))
                 {
                     _overlay.PostEvent(eventName, payload);
                 }
+            }
+        }
+
+        private void UpdatePassiveHud(long now)
+        {
+            // Menus and startup always win. Never acquire input or cancel their intent.
+            if (_overlayRequestedVisible || _menuRevealGate.PendingPresentationId != null ||
+                _providerPresentationCommitGate.PendingPresentationId != null)
+            {
+                _passiveHudVisible = false;
+                return;
+            }
+            bool active = _browserReady && _storyModeReady && _storyModePlayable &&
+                _runtimeReadyHandoffAttempted && !Game.IsPaused && _passiveHud.Active(now) &&
+                _passiveHud.Owner != null && ReactorHostApi.ExtensionHasCapability(
+                    _passiveHud.Owner, PassiveHudContract.Capability);
+            if (!active)
+            {
+                if (_passiveHudVisible)
+                {
+                    _overlay.PostEvent("hud.frame", new JObject { ["schema"] = 1, ["visible"] = false });
+                    if (_overlay is IReasonedVisibilityRuntime passiveVisibility)
+                        passiveVisibility.SetVisible(false, HostVisibilityReason.PresentationPreparation);
+                    else _overlay.SetVisible(false);
+                    _passiveHudVisible = false;
+                }
+                return;
+            }
+            if (!_passiveHudVisible)
+            {
+                if (CurrentHostSurface != HostSurfaceMode.None && CurrentHostSurface != HostSurfaceMode.PassiveHud)
+                    return;
+                _inputMode = MenuPresentationPolicy.HiddenInputMode;
+                _overlay.PostEvent("hud.frame", _passiveHud.Frame);
+                _overlay.PostEvent("host.surface", new JObject {
+                    ["mode"] = HostSurfaceMode.PassiveHud, ["generation"] = NextHostSurfaceGeneration(),
+                });
+                _overlay.SetVisible(true);
+                _passiveHudVisible = true;
+                _nextPassiveHudFrame = now + 100;
+            }
+            else if (now >= _nextPassiveHudFrame)
+            {
+                _overlay.PostEvent("hud.frame", _passiveHud.Frame);
+                _nextPassiveHudFrame = now + 100;
             }
         }
 

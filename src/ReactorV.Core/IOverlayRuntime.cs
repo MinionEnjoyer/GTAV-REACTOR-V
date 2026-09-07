@@ -161,8 +161,10 @@ namespace RageWebUI.Core
         public const string Verifying = "verifying";
         public const string SetupStatus = "setup-status";
         public const string Initializing = "initializing";
+        public const string PassiveHud = "passive-hud";
 
         public static string Normalize(string? mode) =>
+            string.Equals(mode, PassiveHud, StringComparison.Ordinal) ? PassiveHud :
             string.Equals(mode, About, StringComparison.Ordinal)
                 ? About
                 : string.Equals(mode, Verifying, StringComparison.Ordinal)
@@ -177,6 +179,7 @@ namespace RageWebUI.Core
             string.Equals(mode, Initializing, StringComparison.Ordinal);
 
         public static bool RequiresPaintProof(string? mode) =>
+            string.Equals(mode, PassiveHud, StringComparison.Ordinal) ||
             string.Equals(mode, About, StringComparison.Ordinal) ||
             string.Equals(mode, Verifying, StringComparison.Ordinal) ||
             string.Equals(mode, SetupStatus, StringComparison.Ordinal) ||

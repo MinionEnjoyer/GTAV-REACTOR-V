@@ -1,4 +1,4 @@
-export type HostPaintMode = 'about' | 'verifying' | 'setup-status' | 'initializing'
+export type HostPaintMode = 'about' | 'verifying' | 'setup-status' | 'initializing' | 'passive-hud'
 
 export type PaintIdentity =
   | { kind: 'host'; mode: HostPaintMode; generation: number }

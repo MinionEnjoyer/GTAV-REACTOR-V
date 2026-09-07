@@ -42,5 +42,5 @@ export function canAcknowledgeHostSurface(
 ): boolean {
   if (browserCapabilities(role).bootstrapInput) return true
   // Paint acknowledgement does not grant bootstrap visibility or input authority.
-  return role === 'gpu-renderer' && ['initializing', 'about', 'verifying', 'setup-status'].includes(surfaceMode)
+  return role === 'gpu-renderer' && ['initializing', 'about', 'verifying', 'setup-status', 'passive-hud'].includes(surfaceMode)
 }
