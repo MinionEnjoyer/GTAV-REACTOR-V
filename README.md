@@ -58,7 +58,12 @@ render route instead of attempting unverified hooks. Vulkan is not supported.
    CEF/native renderer dependencies are included in the runtime ZIP.
 3. Download the matching edition ZIP and its `.sha256` file from Releases. Check
    the ZIP using `Get-FileHash -Algorithm SHA256` before extracting it.
-4. Extract into the GTA folder containing `GTA5.exe` or `GTA5_Enhanced.exe`.
+4. For an existing modded installation, use the separate
+   `ReactorV-0.2.2-installer.zip` from Releases; its installer preserves the
+   consumer preloader/menu/HUD as well as settings and extension assets.
+   Do not overwrite a consumer's `ui/index.html` with the neutral runtime page.
+   On a fresh installation, extract the edition runtime into the GTA folder
+   containing `GTA5.exe` or `GTA5_Enhanced.exe`.
    The layout is:
 
    ```text
@@ -80,7 +85,7 @@ bootstrap can display progress before the managed provider is ready. Rendering
 readiness does not imply that ScriptHook gameplay callbacks are ready yet.
 
 For an existing ALLIN1 installation, back up the runtime first and preserve
-third-party extension assets/settings. The source-tree
+third-party extension assets/settings and browser composition. The source-tree
 `tools/install-live-test-package.ps1` provides edition/hash checks and ownership
 preservation. Do not delete the entire `plugins/ReactorV` folder to uninstall a
 single mod: other mods may depend on it.
@@ -90,7 +95,7 @@ single mod: other mods may depend on it.
 `scripts/ReactorV/ReactorV.json` controls the managed interface. Defaults include
 F9, `startVisible: false`, `showFirstRunSplash: false`, `renderer: auto`, and developer
 tools disabled. `plugins/ReactorV/ReactorV.Preloader.json` controls the early
-browser host. Edition preview packages enable the native browser route and ship
+browser host. Edition packages enable the native browser route and ship
 the matching version-gated marker; keep those files together.
 
 Logs are written beneath `%LOCALAPPDATA%\ReactorV`. When reporting an issue,
