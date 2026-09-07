@@ -1,6 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GbaySurface } from './menu/GbaySurface'
+import { GbayConfirmationDialog } from './menu/MenuSurface'
+import { readabilityFixtures } from './readabilityFixtures'
+import { handleGbayCatalogWheel } from './menu/gbayWheelInput'
+import { StartupTransitionSurface } from './menu/StartupTransitionSurface'
 import type { MenuControllerSnapshot } from './menu/controller'
 import './styles.css'
 import './visualHarness.css'
@@ -63,12 +67,37 @@ const workbenchSnapshot: MenuControllerSnapshot = {
   },
 }
 
-const snapshot = view === 'selection' ? selectionSnapshot : workbenchSnapshot
+import { Speedometer } from './hud/Speedometer'
+
+const snapshot = structuredClone(readabilityFixtures[view ?? ''] ?? (view === 'selection' ? selectionSnapshot : workbenchSnapshot))
+const scrollAudit = new URLSearchParams(window.location.search).has('scroll-audit')
+if (scrollAudit) {
+  const cards = snapshot.route.items.filter(item => item.type === 'command' && /weapon\.customize\.(select|apply)$/.test(item.action))
+  for (let copy = 1; copy < 4; copy++) {
+    snapshot.route.items.push(...cards.map(item => ({ ...item, id: `${item.id}-audit-${copy}` })))
+  }
+  // Use the same window-level handler as MenuSurface. Plain GbaySurface
+  // screenshots missed wheel interception because they omit that controller.
+  window.addEventListener('wheel', event => {
+    handleGbayCatalogWheel(event, document.querySelector('[data-reactor-menu-surface-root]'),
+      snapshot.route.items, action => { document.documentElement.dataset.auditPage = action })
+  }, { passive: false })
+}
 const noop = () => {}
+const activate = (item: { id: string }) => { document.documentElement.dataset.auditAction = item.id }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <GbaySurface
+    {view === 'speedometer' ? <Speedometer frame={{ schema: 1, visible: true, kind: 'speedometer', speed: 128, units: 'MPH', gear: '5', manual: false, notice: '' }} /> : view === 'preloader' ? <StartupTransitionSurface surfaceGeneration={1} onClose={noop} status={{
+      schemaVersion: 1, sequence: 1, sessionId: 'readability-fixture', phase: 'waiting-for-provider',
+      providerConnected: false, defaultMenuRequested: false, defaultMenuDeadlineUtc: null,
+      components: [
+        {id:'reactor', label:'Reactor V', state:'ready', detail:'Interface ready.'},
+        {id:'scripthook', label:'ScriptHookV', state:'initializing', detail:'Creating GTA script threads.'},
+        {id:'allin1', label:'ALLIN1', state:'waiting', detail:'Waiting for the gameplay provider.'},
+      ],
+      console: {maxEntries:48, dropped:0, entries:Array.from({length:20}, (_,i)=>({sequence:i+1, timestampUtc:'2026-09-04T18:00:00Z', source:'bootstrap', stage:'provider-wait', message:'Waiting for the managed gameplay provider to finish registering Story Mode services.'}))},
+    }} /> : <GbaySurface
       snapshot={snapshot}
       account={{ label: 'Balance', value: '$7,277,301' }}
       loading={false}
@@ -77,9 +106,10 @@ createRoot(document.getElementById('root')!).render(
       notice="Ready"
       onClose={noop}
       onFocus={noop}
-      onActivate={noop}
+      onActivate={activate}
       onSetValue={noop}
       onRetry={noop}
-    />
+    />}
+    {view === 'confirmation' && <GbayConfirmationDialog confirmation={{ title: 'Purchase Special Carbine Mk II suppressor?', message: 'Pay $12,500 from Michael’s account? The attachment remains owned when unequipped, and can be equipped again for free.' }} onRespond={(confirmed) => { document.documentElement.dataset.auditConfirmation = String(confirmed) }} />}
   </StrictMode>,
 )

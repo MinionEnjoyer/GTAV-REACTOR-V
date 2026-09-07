@@ -15,6 +15,7 @@ import { MenuController, type MenuControllerSnapshot } from './controller'
 import { handleMenuContextMenu, performMenuBack } from './backInput'
 import { GbaySurface } from './GbaySurface'
 import { gbayCardEdgePageAction, invokeGbaySemanticInput, moveGbayCardFocus } from './gbayInput'
+import { handleGbayCatalogWheel } from './gbayWheelInput'
 import { SearchKeyboard } from './SearchKeyboardSurface'
 import {
   activateSearchKeyboardKey,
@@ -637,15 +638,12 @@ export function MenuSurface({
     const onWheel = (event: WheelEvent) => {
       if (!acceptsInput()) return
       if (!allin1Presentation || busyRef.current || event.deltaY === 0) return
-      const target = event.target instanceof Element ? event.target : null
-      if (!target?.closest('.gbay-catalog')) return
-      if (target.closest('.gbay-workbench-scrollbox')) return
-      event.preventDefault()
-      const action = event.deltaY > 0 ? 'next-page' : 'previous-page'
-      void perform(async (current) => {
-        const result = await invokeGbaySemanticInput(current, action)
-        return result.invocation
-      }, 'navigate', 'pointer')
+      handleGbayCatalogWheel(event, surfaceRef.current, controllerRef.current?.currentRoute.items ?? [], (action) => {
+        void perform(async (current) => {
+          const result = await invokeGbaySemanticInput(current, action)
+          return result.invocation
+        }, 'navigate', 'pointer')
+      })
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => window.removeEventListener('wheel', onWheel)

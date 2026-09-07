@@ -11,6 +11,21 @@ const callbacks = {
   onRetry: () => {},
 }
 
+it('uses a scroll list with no fallback page controls when choosing a customizable weapon', () => {
+  const html = render({ menuId: 'weapons.customize', stack: ['weapons.customize'], route: {
+    id: 'weapons.customize', menuId: 'weapons.customize', title: 'CUSTOMIZE WEAPONS', items: [
+      { id: 'custom-weapon-pistol', type: 'command', label: 'Pistol', action: 'weapon.customize.select' },
+      { id: 'custom-pages', type: 'pagination', label: 'Page', action: 'weapon.customize.page', page: 1, pageCount: 1 },
+    ],
+  } })
+  expect(html).toContain('SCROLL TO CHOOSE A WEAPON')
+  expect(html).toContain('gbay-customize-weapons gbay-workbench-scrollbox')
+  expect(html).toContain('Buy ammo on the weapon screen')
+  expect(html).not.toContain('Page 1')
+  expect(html).not.toContain('Previous page')
+  expect(html).not.toContain('LB/RB PAGES')
+})
+
 function render(snapshot: MenuControllerSnapshot, account?: { label: string, value: string }) {
   return renderToStaticMarkup(
     <GbaySurface
@@ -26,6 +41,49 @@ function render(snapshot: MenuControllerSnapshot, account?: { label: string, val
 }
 
 describe('GBAY marketplace surface', () => {
+  it('shows the vehicle hitch route without treating hitches as catalog cards', () => {
+    const catalog = render({ menuId: 'vehicles', stack: ['vehicles'], route: { id: 'vehicles', title: 'Vehicles', items: [
+      { id: 'vehicle-hitches', type: 'route', label: 'Trailer hitches', routeId: 'vehicle-hitches' },
+    ] } })
+    expect(catalog).toContain('Trailer hitches')
+    const hitches = render({ menuId: 'vehicle-hitches', stack: ['vehicles', 'vehicle-hitches'], route: { id: 'vehicle-hitches', title: 'Trailer hitches', items: [
+      { id: 'hitch-status', type: 'status', label: 'Current vehicle', value: 'No compatible trailers nearby' },
+      { id: 'hitch-one', type: 'command', label: 'Front hitch', description: 'Experimental joint', action: 'hitch.connect.experimental', enabled: false },
+    ] } })
+    expect(hitches).toContain('Front hitch')
+    expect(hitches).toContain('Experimental joint')
+    expect(hitches).toContain('disabled=""')
+    expect(hitches).not.toContain('No vehicle listings')
+    expect(hitches).not.toContain('Page 1')
+  })
+  it('renders full ammunition as stock status, not a free purchase', () => {
+    for (const description of ['Type: Ammunition · Status: Active · Price: FREE',
+      'Type: Ammunition · Status: Fully stocked · Price: FULL']) {
+      const html = render({ menuId: 'weapons.customize', stack: ['weapons.customize'],
+        route: { id: 'weapons.customize', title: 'Pistol', items: [
+          { id: 'selected-weapon', type: 'status', label: 'Weapon', value: 'Pistol' },
+          { id: 'custom-option-ammo', type: 'command', action: 'weapon.customize.apply',
+            label: 'Ammunition refill', enabled: false, description },
+        ] } })
+      expect(html).toContain('Fully stocked')
+      expect(html).toContain('>FULL</em>')
+      expect(html).not.toContain('>FREE</em>')
+      expect(html).toContain('disabled=""')
+    }
+  })
+
+  it('keeps a payable ammo refill price visible', () => {
+    const html = render({ menuId: 'weapons.customize', stack: ['weapons.customize'],
+      route: { id: 'weapons.customize', title: 'Pistol', items: [
+        { id: 'selected-weapon', type: 'status', label: 'Weapon', value: 'Pistol' },
+        { id: 'custom-option-ammo', type: 'command', action: 'weapon.customize.apply',
+          label: 'Ammunition refill', enabled: true,
+          description: 'Type: Ammunition · Status: Available · Price: $100 · Detail: 50 rounds' },
+      ] } })
+    expect(html).toContain('>$100</em>')
+    expect(html).not.toContain('>FULL</em>')
+  })
+
   it('shows Unequip on the equipped attachment card instead of a separate removal listing', () => {
     const html = render({
       menuId: 'weapons.customize', stack: ['home', 'weapons.customize'], focusedItemId: 'custom-option-can-unequip', route: {

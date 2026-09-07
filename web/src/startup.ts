@@ -237,8 +237,11 @@ export function startupDisplayComponents(status: StartupStatus): StartupDisplayC
         : 'Waiting for the ALLIN1 provider.'),
     }
   }
+  // This is the ALLIN1 composition, not the standalone Reactor preloader.
+  // Runtime-only snapshots must not remove a consumer's checklist row during
+  // handoff. Keep its slot and report Waiting until readiness is authoritative.
   return [component('reactor', 'REACTOR V'), combineBridgeStatus(status),
-    ...(status.components.some((item) => item.id === 'allin1') ? [component('allin1', 'ALLIN1')] : [])]
+    component('allin1', 'ALLIN1')]
 }
 
 export function visibleStartupConsoleEntries(status: StartupStatus): StartupConsoleEntry[] {

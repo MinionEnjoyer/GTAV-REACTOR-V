@@ -329,6 +329,17 @@ describe('ALLIN1 GBAY presentation', () => {
     expect(routeItems('garage').map((item) => item.id)).toEqual(['location-harmony', 'stored-harmony-0'])
   })
 
+  it('removes legacy customization pagination from the focus ring', () => {
+    const projected = projectAllin1GbayMenu({
+      id: 'weapons.customize', extensionId: 'allin1.gbay', title: 'CUSTOMIZE WEAPONS', homeRouteId: 'weapons.customize', routes: [
+        { id: 'weapons.customize', menuId: 'weapons.customize', title: 'CUSTOMIZE WEAPONS', items: [
+          { id: 'custom-pages', type: 'pagination', label: 'Page', action: 'weapon.customize.page', page: 1, pageCount: 2 },
+        ] },
+      ],
+    })
+    expect(projected.routes![0].items.find(item => item.id === 'custom-pages')?.visible).toBe(false)
+  })
+
   it('inlines customization weapon and option grids while preserving typed workbench actions', () => {
     const menu: RoutedMenuDescriptor = {
       id: 'weapons.customize', extensionId: 'allin1.gbay', title: 'CUSTOMIZE WEAPONS', homeRouteId: 'weapons.customize', routes: [

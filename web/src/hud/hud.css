@@ -1,15 +1,15 @@
 .reactor-speedometer {
-  position: fixed; right: max(5vw, 30px); bottom: max(6vh, 30px);
-  display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 22px;
-  min-width: clamp(280px, 20vw, 900px); min-height: 8vh; box-sizing: border-box;
-  color: #f5f8f6; background: rgba(52, 76, 65, .90);
-  border: 1px solid rgba(206, 235, 220, .22); border-radius: 8px;
-  box-shadow: 0 4px 18px #0005; pointer-events: none; user-select: none;
+  position: fixed; right: max(3vw, 24px); bottom: max(5vh, 24px);
+  display: flex; align-items: center; gap: 16px; padding: 0;
+  width: max-content; box-sizing: border-box;
+  color: #f5f8f6; background: transparent; border: 0;
+  pointer-events: none; user-select: none;
+  text-shadow: 0 2px 4px #000, 0 0 2px #000;
   font-family: system-ui, sans-serif; font-variant-numeric: tabular-nums;
 }
 .reactor-speedometer-speed { display: flex; align-items: baseline; gap: 10px; }
-.reactor-speedometer-speed strong { font-size: clamp(36px, 3vw, 60px); font-weight: 650; line-height: 1; }
+.reactor-speedometer-speed strong { font-size: clamp(90px, 7.5vw, 150px); font-weight: 650; line-height: 1; }
 .reactor-speedometer-speed span, .reactor-speedometer-gear span { font-size: 13px; color: #c0d5cc; letter-spacing: .06em; }
-.reactor-speedometer-gear { border-left: 1px solid #ffffff35; padding-left: 20px; display: grid; justify-items: center; gap: 3px; }
-.reactor-speedometer-gear strong { font-size: 27px; font-weight: 600; }
-.reactor-speedometer-notice { position: absolute; right: 0; bottom: calc(100% + 10px); width: 360px; margin: 0; padding: 10px 14px; background: #101c18ee; border-radius: 6px; font-size: 14px; }
+.reactor-speedometer-gear { display: grid; justify-items: center; gap: 3px; }
+.reactor-speedometer-gear strong { font-size: 67.5px; font-weight: 600; line-height: 1; }
+.reactor-speedometer-notice { position: absolute; right: 0; bottom: calc(100% + 10px); width: min(360px, 85vw); margin: 0; font-size: 14px; }

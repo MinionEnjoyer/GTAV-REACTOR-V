@@ -70,7 +70,7 @@ function controllerHints(section: ReturnType<typeof classifyGbayRoute>): string 
     return `${common} · LB/RB PAGES · LT/RT CATEGORY · Y FILTER · X SEARCH · R3 FAVORITE · A SELECT · B BACK`
   }
   if (section === 'customization') {
-    return `${common} · LB/RB PAGES · X SEARCH · A SELECT · B BACK`
+    return `${common} · SCROLL OPTIONS · X SEARCH · A SELECT · B BACK`
   }
   if (section === 'gear') return `${common} · LB/RB PAGES · LT/RT CATEGORY · A SELECT · B BACK`
   if (section === 'garage') return `${common} · SCROLL VEHICLES · A SELECT · B BACK`
@@ -372,6 +372,10 @@ function GbayVehicles({
 
   return (
     <div className="gbay-vehicle-page">
+      {items.filter(item => item.type === 'route').map(item => (
+        <button key={item.id} type="button" className={`gbay-favorites${focusedId === item.id ? ' focused' : ''}`}
+          disabled={itemDisabled(item, busy)} onMouseEnter={() => onFocus(item)} onClick={() => onActivate(item)}>{item.label}</button>
+      ))}
       {category && (
         <nav className={`gbay-tabs${focusedId === category.id ? ' focused' : ''}`} aria-label="Vehicle categories">
           {category.options.map((option) => (
@@ -526,18 +530,16 @@ function GbayWeaponCustomize(props: GbayCatalogProps) {
     /group|section|workbench|option-kind/i.test(`${item.id} ${item.label}`))
   const groupRoutes = items.filter((item) => item.type === 'route' &&
     /ammo|component|finish|livery|color/i.test(`${item.id} ${item.label}`))
-  const pages = itemByType(items, 'pages', 'pagination') as MenuPaginationItem | undefined ??
-    items.find((item): item is MenuPaginationItem => item.type === 'pagination')
   const selectingWeapon = !selected && options.length === 0
 
   if (selectingWeapon) return (
     <div className="gbay-customize-page weapon-selection">
       <header className="gbay-workbench-header">
-        <span><small>WEAPON WORKBENCH</small><h1>Choose an owned weapon</h1><p>Only weapons in the current character’s loadout are available.</p></span>
+        <span><small>WEAPON WORKBENCH</small><h1>Choose an owned weapon</h1><p>Held weapons with attachment or finish choices. Buy ammo on the weapon screen.</p></span>
       </header>
       {category && <GbayCategoryTabs item={category} focused={focusedId === category.id} busy={busy} onFocus={onFocus} onSetValue={onSetValue} label="Owned weapon categories" />}
       {search && <div className="gbay-toolbar"><label className={`gbay-search${focusedId === search.id ? ' focused' : ''}`}><span aria-hidden="true">⌕</span><input key={`${search.id}:${search.value}`} type="search" defaultValue={search.value} placeholder={search.placeholder ?? 'Search owned weapons'} maxLength={search.maxLength} disabled={itemDisabled(search, busy)} onFocus={() => onFocus(search)} onBlur={(event) => { if (event.currentTarget.value !== search.value) onSetValue(search, event.currentTarget.value) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} /></label></div>}
-      <section className="gbay-catalog gbay-customize-weapons" aria-label="Owned weapons">
+      <section className="gbay-catalog gbay-customize-weapons gbay-workbench-scrollbox" aria-label="Owned weapons" tabIndex={0}>
         {weapons.map((weapon) => {
           const preview = gbayCardPreview(weapon, items)
           const fallback = <span className="gbay-customize-weapon-mark" aria-hidden="true">⌖</span>
@@ -567,7 +569,7 @@ function GbayWeaponCustomize(props: GbayCatalogProps) {
         {loading && weapons.length === 0 && <GbayMessage label="Loading owned weapons…" />}
         {!loading && error && weapons.length === 0 && <GbayMessage label="Weapon list unavailable" detail={error} error onRetry={onRetry} />}
       </section>
-      <GbayCatalogPaging pages={pages} busy={busy} label="Select a weapon to open its guarded workbench" onFocus={onFocus} onSetValue={onSetValue} />
+      <div className="gbay-workbench-scroll-footer"><span>SCROLL TO CHOOSE A WEAPON</span><small>{items.find((item): item is MenuStatusItem => item.type === 'status' && item.id === 'custom-scroll-status')?.value ?? 'Select a weapon to open its workbench'}</small></div>
     </div>
   )
 
@@ -606,7 +608,7 @@ function customizeWeaponSummary(description?: string): string {
 
 function workbenchGroupLabel(value: string): string {
   const normalized = value.toLowerCase()
-  if (normalized.includes('ammo')) return 'Ammo'
+  if (normalized.includes('ammo') || normalized.includes('ammunition')) return 'Ammo'
   if (normalized.includes('component') || normalized.includes('attachment')) return 'Components'
   if (normalized.includes('livery') || normalized.includes('color') || normalized.includes('colour')) return 'Livery Colors'
   if (normalized.includes('finish') || normalized.includes('tint')) return 'Weapon Finishes'
@@ -656,12 +658,15 @@ function GbayCustomizationOptionCard({
   const group = workbenchGroupLabel(detail.category || option.id)
   const equipped = /equipped|active|full/i.test(state)
   const owned = equipped || /owned|installed/i.test(state)
+  // Older bridge payloads called a fully stocked refill "Active · FREE".
+  // It is a disabled stock status, not a zero-cost ammunition offer.
+  const stockedAmmo = group === 'Ammo' && equipped
   return (
     <button type="button" className={`gbay-workbench-card${focused ? ' focused' : ''}${equipped ? ' equipped' : owned ? ' owned' : ''}${unequip ? ' removable' : ''}`} data-menu-focused={focused ? 'true' : 'false'} aria-label={unequip ? `Unequip ${option.label}` : undefined} title={unequip ? 'Unequip this attachment. It remains owned and can be equipped again for free.' : undefined} disabled={itemDisabled(action, busy)} onMouseEnter={() => onFocus(action)} onFocus={() => onFocus(action)} onClick={() => onActivate(action)}>
       <span className="gbay-workbench-card-mark" aria-hidden="true">{group === 'Ammo' ? '◉' : group === 'Components' ? '⌖' : group === 'Livery Colors' ? '◈' : '✦'}</span>
       <small>{group}</small><strong>{option.label}</strong>
-      <span className="gbay-workbench-card-state">{state}</span>
-      <em className={unequip ? 'gbay-attachment-unequip' : undefined}>{unequip ? 'UNEQUIP' : detail.price || (owned ? 'OWNED' : 'APPLY')}</em>
+      <span className="gbay-workbench-card-state">{stockedAmmo ? 'Fully stocked' : state}</span>
+      <em className={unequip ? 'gbay-attachment-unequip' : undefined}>{stockedAmmo ? 'FULL' : unequip ? 'UNEQUIP' : detail.price || (owned ? 'OWNED' : 'APPLY')}</em>
     </button>
   )
 }

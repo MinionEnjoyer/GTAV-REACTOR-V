@@ -31,6 +31,18 @@ const fixture: StartupStatus = {
 }
 
 describe('ALLIN1 startup transition surface', () => {
+  it('keeps all three service rows across runtime-only handoff snapshots', () => {
+    for (const providerConnected of [false, true]) {
+      const html = renderToStaticMarkup(<StartupTransitionSurface
+        status={{ ...fixture, providerConnected,
+          components: fixture.components.filter(item => item.id !== 'allin1') }}
+        surfaceGeneration={8} onClose={vi.fn()} />)
+      expect((html.match(/class="startup-component /g) ?? [])).toHaveLength(3)
+      expect(html).toContain('<strong>ALLIN1</strong>')
+      expect(html).toContain('Waiting for the ALLIN1 provider.')
+    }
+  })
+
   it('renders the ALLIN1 preloader, three services, and a readable bounded log', () => {
     const html = renderToStaticMarkup(
       <StartupTransitionSurface status={fixture} surfaceGeneration={7} onClose={vi.fn()} />,

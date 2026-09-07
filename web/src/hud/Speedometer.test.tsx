@@ -1,13 +1,25 @@
+/// <reference types="node" />
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { parseSpeedometer, Speedometer, subscribeSpeedometer, type SpeedometerFrame } from './Speedometer'
 import { hostSurfaceSupersedesPresentation, parseHostSurfaceMode } from '../surface'
 import { canAcknowledgeHostSurface } from '../gta/browserRole'
 import type { GtaBridge } from '../gta/bridge'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+const hudStyles = readFileSync(resolve(process.cwd(), 'src/hud/hud.css'), 'utf8')
 
 const frame: SpeedometerFrame = { schema: 1, visible: true, kind: 'speedometer', speed: 42.6, units: 'MPH', gear: '3', manual: true, notice: '' }
 afterEach(() => vi.useRealTimers())
 describe('passive speedometer', () => {
+  it('uses 150 percent larger numbers in a compact card-free corner HUD', () => {
+    expect(hudStyles).toContain('clamp(90px, 7.5vw, 150px)')
+    expect(hudStyles).toContain('font-size: 67.5px')
+    expect(hudStyles).toContain('background: transparent')
+    expect(hudStyles).toContain('width: max-content')
+    expect(hudStyles).not.toMatch(/space-between|min-width|box-shadow|border-left/)
+    expect(hudStyles).toContain('bottom: max(5vh, 24px)')
+  })
   it('renders speed, units and gear without interactive elements or marketplace content', () => {
     const html = renderToStaticMarkup(<Speedometer frame={frame} />)
     expect(html).toContain('43'); expect(html).toContain('MPH'); expect(html).toContain('MANUAL')

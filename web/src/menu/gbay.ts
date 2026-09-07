@@ -73,6 +73,7 @@ function normalizedRouteText(route: MenuRoute): string {
 
 export function classifyGbayRoute(route: MenuRoute): GbaySectionId {
   const value = normalizedRouteText(route)
+  if (/\bhitches?\b/.test(value)) return 'other'
   if (/\b(deliver|delivery|location|checkout)\b/.test(value)) return 'delivery'
   if (/\b(customi[sz](?:e|ation)?|weapon mod|component|attachment)\b/.test(value)) return 'customization'
   if (/\b(weapons?|ammunition|ammo)\b/.test(value)) return 'weapons'
@@ -200,7 +201,7 @@ export function projectAllin1GbayMenu(menu: RoutedMenuDescriptor): RoutedMenuDes
     // removing them from the browser focus ring and visual card grid.
     route.items = route.items.map((item) =>
       isGbayWeaponPreviewAction(item) || isLegacyGbayStateRefreshItem(item) ||
-      (section === 'garage' && item.type === 'pagination')
+      ((section === 'garage' || section === 'customization') && item.type === 'pagination')
       ? { ...item, visible: false }
       : item)
     route.subtitle ??= projected.description

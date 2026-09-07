@@ -16,6 +16,11 @@
 
 :root {
   font-family: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
+  --ui-body-font: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
+  --gbay-meta: clamp(13px, .8vw, 18px);
+  --gbay-body: clamp(14px, .95vw, 22px);
+  --gbay-label: clamp(16px, 1.05vw, 26px);
+  --gbay-title: clamp(24px, 1.6vw, 38px);
   --gta-display-font: "Reactor GTA Display", Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
   --gta-ui-heading-font: "Reactor GTA Condensed", "Arial Narrow", "Segoe UI", sans-serif;
   color: #f5f9ff;
@@ -281,7 +286,7 @@ body { background-image: none !important; }
   border: 1px solid #2379a6;
   border-radius: 4px;
   background: #0c5e89;
-  font: 750 8px/1.1 inherit;
+  font: 750 8px/1.1 var(--ui-body-font);
   cursor: pointer;
 }
 .reactor-detected-mods button:hover { border-color: #60c8ff; background: #1176aa; }
@@ -443,7 +448,7 @@ body { background-image: none !important; }
   gap: 14px;
   padding: 15px 17px;
   border-bottom: 1px solid #176b36;
-  background: linear-gradient(100deg, #1f7f42, #248e48);
+  background: #176b36;
 }
 
 .startup-transition-brand {
@@ -459,7 +464,7 @@ body { background-image: none !important; }
 .startup-transition-title small {
   color: rgba(255, 255, 255, .76);
   font-family: var(--gta-ui-heading-font);
-  font-size: 11px;
+  font-size: var(--gbay-meta);
   font-weight: 650;
   letter-spacing: .14em;
 }
@@ -467,7 +472,7 @@ body { background-image: none !important; }
   margin: 3px 0 1px;
   color: #fff;
   font-family: var(--gta-display-font);
-  font-size: 29px;
+  font-size: var(--gbay-title);
   font-weight: 400;
   line-height: 1.12;
   letter-spacing: .025em;
@@ -475,7 +480,7 @@ body { background-image: none !important; }
 .startup-transition-title p {
   margin: 0;
   color: rgba(255, 255, 255, .82);
-  font-size: 10px;
+  font-size: var(--gbay-meta);
   line-height: 1.35;
 }
 .startup-transition-header button {
@@ -486,7 +491,7 @@ body { background-image: none !important; }
   border: 1px solid rgba(255, 255, 255, .48);
   border-radius: 4px;
   background: rgba(0, 62, 27, .18);
-  font: 400 21px/1 inherit;
+  font: 400 var(--gbay-title)/1 var(--ui-body-font);
   cursor: pointer;
 }
 .startup-transition-header button:hover { border-color: #fff; background: rgba(0, 49, 22, .34); }
@@ -500,7 +505,7 @@ body { background-image: none !important; }
   margin: 0 0 7px;
   color: #176b36;
   font-family: var(--gta-ui-heading-font);
-  font-size: 12px;
+  font-size: var(--gbay-body);
   font-weight: 650;
   letter-spacing: .09em;
   text-transform: uppercase;
@@ -534,28 +539,28 @@ body { background-image: none !important; }
   border: 2px solid #9daca4;
   border-radius: 50%;
   background: transparent;
-  font-size: 11px;
+  font-size: var(--gbay-meta);
   font-weight: 900;
 }
 .startup-component-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .startup-component strong {
   overflow: hidden;
   color: #173d32;
-  font-size: 12px;
+  font-size: var(--gbay-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .startup-component small {
   overflow: hidden;
   color: #52635c;
-  font-size: 10px;
+  font-size: var(--gbay-meta);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .startup-component em {
   color: #66756e;
-  font: normal 800 9px/1 inherit;
+  font: normal 800 var(--gbay-meta)/1 var(--ui-body-font);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -589,12 +594,12 @@ body { background-image: none !important; }
   color: #fff;
   border-bottom: 1px solid #284337;
   background: #173d2e;
-  font-size: 9px;
+  font-size: var(--gbay-meta);
   font-weight: 800;
   letter-spacing: .1em;
   text-transform: uppercase;
 }
-.startup-console > header small { color: #abd2b9; font-size: 8px; }
+.startup-console > header small { color: #abd2b9; font-size: var(--gbay-meta); }
 .startup-console ol {
   min-height: 132px;
   max-height: 254px;
@@ -605,7 +610,7 @@ body { background-image: none !important; }
   list-style: none;
   scrollbar-width: thin;
   scrollbar-color: #3f6659 transparent;
-  font: 10.5px/1.48 "Cascadia Mono", Consolas, monospace;
+  font: var(--gbay-meta)/1.48 "Cascadia Mono", Consolas, monospace;
 }
 .startup-console li {
   display: grid;
@@ -640,7 +645,7 @@ body { background-image: none !important; }
   color: #52635c;
   border-top: 1px solid #d4ddd9;
   background: #eef3f0;
-  font-size: 9px;
+  font-size: var(--gbay-meta);
 }
 .startup-transition-modal kbd { color: #176b36; font: inherit; font-weight: 750; }
 .startup-transition-activity { display: flex; align-items: center; gap: 7px; color: #176b36; font-weight: 750; }
@@ -768,18 +773,18 @@ html[data-reactor-browser-role="gpu-renderer"]
 
 .gbay-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .gbay-brand strong { font: 900 35px/1 var(--gta-display-font); letter-spacing: .035em; }
-.gbay-brand span { color: #d6e8dc; font-size: 9px; font-weight: 750; letter-spacing: .13em; }
+.gbay-brand span { color: #d6e8dc; font-size: var(--gbay-meta); font-weight: 750; letter-spacing: .13em; }
 .gbay-section {
   padding: 7px 18px;
   border: 1px solid rgba(255, 255, 255, .25);
   background: rgba(255, 255, 255, .10);
-  font-size: 12px;
+  font-size: var(--gbay-body);
   font-weight: 800;
   letter-spacing: .08em;
 }
 .gbay-balance { min-width: 138px; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; }
-.gbay-balance small { color: #d2ead9; font-size: 8px; letter-spacing: .12em; }
-.gbay-balance strong { margin-top: 2px; font-size: 18px; }
+.gbay-balance small { color: #d2ead9; font-size: var(--gbay-meta); letter-spacing: .12em; }
+.gbay-balance strong { margin-top: 2px; font-size: var(--gbay-label); }
 
 .gbay-tabs {
   min-height: 48px;
@@ -798,7 +803,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   border: 0;
   border-bottom: 4px solid transparent;
   background: transparent;
-  font: 700 10px/1 inherit;
+  font: 700 var(--gbay-meta)/1 var(--ui-body-font);
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -826,21 +831,21 @@ html[data-reactor-browser-role="gpu-renderer"]
   border: 1px solid #bac9c0;
   background: white;
 }
-.gbay-search input { width: 100%; min-width: 0; color: #1e1e23; border: 0; outline: 0; background: transparent; font: 11px inherit; }
+.gbay-search input { width: 100%; min-width: 0; color: #1e1e23; border: 0; outline: 0; background: transparent; font: var(--gbay-meta) var(--ui-body-font); }
 .gbay-filter { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 1px solid #bac9c0; background: white; }
-.gbay-filter > span { color: #52635a; font-size: 9px; text-transform: uppercase; }
-.gbay-filter select { color: #25372d; border: 0; outline: 0; background: transparent; font: 10px inherit; }
+.gbay-filter > span { color: #52635a; font-size: var(--gbay-meta); text-transform: uppercase; }
+.gbay-filter select { color: #25372d; border: 0; outline: 0; background: transparent; font: var(--gbay-meta) var(--ui-body-font); }
 .gbay-favorites {
   height: 34px;
   padding: 0 12px;
   color: #31523e;
   border: 1px solid #a9bdb1;
   background: #e0e8e3;
-  font: 700 10px/1 inherit;
+  font: 700 var(--gbay-meta)/1 var(--ui-body-font);
 }
 .gbay-favorites span { color: #168044; }
 .gbay-favorites.active { color: white; border-color: #126634; background: #198143; }
-.gbay-toolbar .focused { outline: 2px solid #27a653; outline-offset: 1px; }
+.gbay-toolbar .focused { outline: 2px solid #18783e; outline-offset: 1px; }
 
 .gbay-catalog {
   flex: 1;
@@ -882,16 +887,16 @@ html[data-reactor-browser-role="gpu-renderer"]
   background: linear-gradient(145deg, #dce6e0, #c5d8cc);
 }
 .gbay-card-visual > span { color: rgba(18, 72, 42, .28); font: 400 58px/1 serif; }
-.gbay-card-visual small { position: absolute; left: 10px; top: 9px; font-size: 8px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-.gbay-card-visual em { position: absolute; right: 8px; top: 7px; padding: 5px 7px; color: white; background: #12482a; font: normal 750 8px/1 inherit; }
+.gbay-card-visual small { position: absolute; left: 10px; top: 9px; font-size: var(--gbay-meta); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.gbay-card-visual em { position: absolute; right: 8px; top: 7px; padding: 5px 7px; color: white; background: #12482a; font: normal 750 var(--gbay-meta)/1 var(--ui-body-font); }
 .gbay-card-copy { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 9px 10px; background: #fcfdfc; }
-.gbay-card-copy small { color: #2d9c55; font-size: 9px; font-weight: 750; text-transform: uppercase; }
-.gbay-card-copy strong { margin-top: 4px; padding-right: 78px; overflow: hidden; font-size: 15px; line-height: 1.12; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-price { position: absolute; right: 9px; bottom: 9px; padding: 5px 8px; color: #238241; background: #dbf1e2; font-size: 11px; font-weight: 800; }
+.gbay-card-copy small { color: #216b3e; font-size: var(--gbay-meta); font-weight: 750; text-transform: uppercase; }
+.gbay-card-copy strong { margin-top: 4px; padding-right: 78px; overflow: hidden; font-size: var(--gbay-body); line-height: 1.12; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-price { position: absolute; right: 9px; bottom: 9px; padding: 5px 8px; color: #176b36; background: #dbf1e2; font-size: var(--gbay-meta); font-weight: 800; }
 
 .gbay-message { grid-column: 1 / -1; grid-row: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #52635a; text-align: center; }
 .gbay-message.error span, .gbay-state.error { color: #b43e2d; }
-.gbay-message button { padding: 7px 12px; color: white; border: 0; background: #27a653; }
+.gbay-message button { padding: 7px 12px; color: white; border: 0; background: #18783e; }
 
 .gbay-footer {
   min-height: 48px;
@@ -905,12 +910,12 @@ html[data-reactor-browser-role="gpu-renderer"]
   background: #e0e8e3;
 }
 .gbay-pager { display: grid; grid-template-columns: 30px 100px 30px; align-items: center; gap: 5px; }
-.gbay-pager button { height: 30px; color: white; border: 1px solid #126634; background: #27a653; font-size: 20px; }
+.gbay-pager button { height: 30px; color: white; border: 1px solid #126634; background: #18783e; font-size: var(--gbay-title); }
 .gbay-pager button:disabled { color: #78867e; border-color: #b7c3bc; background: #d3ddd7; }
-.gbay-pager span { text-align: center; font-size: 10px; font-weight: 700; }
-.gbay-state { color: #198143; font-size: 9px; }
-.gbay-hints { font-size: 8px; letter-spacing: .035em; }
-.gbay-close { min-width: 76px; height: 30px; color: white; border: 1px solid #0f502b; background: #12482a; font: 700 10px/1 inherit; }
+.gbay-pager span { text-align: center; font-size: var(--gbay-meta); font-weight: 700; }
+.gbay-state { color: #176b36; font-size: var(--gbay-meta); }
+.gbay-hints { font-size: var(--gbay-meta); letter-spacing: .035em; }
+.gbay-close { min-width: 76px; height: 30px; color: white; border: 1px solid #0f502b; background: #12482a; font: 700 var(--gbay-meta)/1 var(--ui-body-font); }
 
 /* GBAY is revealed only after its layout has been committed. Keep the
    complete marketplace surface opaque, static, and free of transform/opacity
@@ -944,12 +949,12 @@ html[data-reactor-browser-role="gpu-renderer"]
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
-  font: 700 9px/1 inherit;
+  font: 700 var(--gbay-meta)/1 var(--ui-body-font);
   letter-spacing: .035em;
   text-transform: uppercase;
   cursor: pointer;
 }
-.gbay-section-nav button span { color: #74d495; font-size: 13px; }
+.gbay-section-nav button span { color: #74d495; font-size: var(--gbay-body); }
 .gbay-section-nav button:hover { color: white; background: #1b6639; }
 .gbay-section-nav button.active { color: white; border-bottom-color: #62df8d; background: #1a683a; }
 .gbay-section-nav button.gbay-nav-tool {
@@ -985,9 +990,9 @@ html[data-reactor-browser-role="gpu-renderer"]
 .gbay-home, .gbay-delivery-page, .gbay-panel, .gbay-vehicle-page { flex: 1; min-height: 0; }
 .gbay-home { display: flex; flex-direction: column; padding: clamp(18px, 3vh, 34px); overflow-y: auto; }
 .gbay-home-intro { padding: 4px 4px 20px; }
-.gbay-home-intro small, .gbay-delivery-page > header small { color: #24854a; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
-.gbay-home-intro h1, .gbay-delivery-page > header h1 { margin: 6px 0 4px; color: #173426; font-family: var(--gta-display-font); font-size: 26px; font-weight: 900; letter-spacing: .02em; }
-.gbay-home-intro p, .gbay-delivery-page > header p { max-width: 720px; margin: 0; color: #617268; font-size: 10px; }
+.gbay-home-intro small, .gbay-delivery-page > header small { color: #176b36; font-size: var(--gbay-meta); font-weight: 800; letter-spacing: .14em; }
+.gbay-home-intro h1, .gbay-delivery-page > header h1 { margin: 6px 0 4px; color: #173426; font-family: var(--gta-display-font); font-size: var(--gbay-title); font-weight: 900; letter-spacing: .02em; }
+.gbay-home-intro p, .gbay-delivery-page > header p { max-width: 720px; margin: 0; color: #52685a; font-size: var(--gbay-meta); }
 .gbay-home-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .gbay-home-tile { position: relative; min-width: 0; min-height: 104px; }
 .gbay-home-primary {
@@ -1036,14 +1041,14 @@ html[data-reactor-browser-role="gpu-renderer"]
 }
 .gbay-home-tool:disabled { opacity: .48; cursor: not-allowed; }
 .gbay-home-tool .gbay-wrench-icon { width: 17px; height: 17px; }
-.gbay-home-grid strong { font-size: 14px; }
-.gbay-home-grid small { overflow: hidden; color: #64736a; font-size: 9px; line-height: 1.35; text-overflow: ellipsis; }
-.gbay-home-grid em { color: #28844a; font: normal 24px/1 inherit; }
-.gbay-home-icon { display: grid; place-items: center; width: 40px; height: 40px; color: white; background: #1d7841; font-size: 18px; }
+.gbay-home-grid strong { font-size: var(--gbay-body); }
+.gbay-home-grid small { overflow: hidden; color: #64736a; font-size: var(--gbay-meta); line-height: 1.35; text-overflow: ellipsis; }
+.gbay-home-grid em { color: #28844a; font: normal var(--gbay-title)/1 var(--ui-body-font); }
+.gbay-home-icon { display: grid; place-items: center; width: 40px; height: 40px; color: white; background: #1d7841; font-size: var(--gbay-label); }
 .gbay-home-status { display: flex; gap: 10px; margin-top: 15px; }
 
 .gbay-vehicle-page { display: flex; flex-direction: column; overflow: hidden; }
-.gbay-result-count { min-width: max-content; color: #4c6255; font-size: 9px; }
+.gbay-result-count { min-width: max-content; color: #4c6255; font-size: var(--gbay-meta); }
 .gbay-catalog-footer {
   min-height: 40px;
   display: flex;
@@ -1054,7 +1059,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   color: #5b6c62;
   border-top: 1px solid #c2d0c8;
   background: #edf2ee;
-  font-size: 9px;
+  font-size: var(--gbay-meta);
 }
 
 .gbay-card { position: relative; }
@@ -1088,7 +1093,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   color: #50685a;
   border: 1px solid #a8bcb0;
   background: #f8fbf9;
-  font: normal 700 14px/1 inherit;
+  font: normal 700 var(--gbay-body)/1 var(--ui-body-font);
 }
 .gbay-card-favorite.active { color: #fff3a3; border-color: #0f502b; background: #12482a; }
 .gbay-product-card .gbay-card-corner-actions {
@@ -1101,14 +1106,14 @@ html[data-reactor-browser-role="gpu-renderer"]
   gap: 6px;
 }
 .gbay-product-card .gbay-card-corner-actions .gbay-card-favorite { position: static; }
-.gbay-model-name { margin-top: 3px; color: #718178; font-size: 8px; text-transform: uppercase; }
-.gbay-product-placeholder { color: rgba(18, 72, 42, .34); font: 500 46px/1 inherit; }
-.gbay-product-state { margin-top: 4px; color: #63776b; font-size: 8px; font-weight: 750; text-transform: uppercase; }
-.gbay-product-state.equip, .gbay-product-state.purchase, .gbay-product-state.available { color: #27864c; }
+.gbay-model-name { margin-top: 3px; color: #718178; font-size: var(--gbay-meta); text-transform: uppercase; }
+.gbay-product-placeholder { color: rgba(18, 72, 42, .34); font: 500 46px/1 var(--ui-body-font); }
+.gbay-product-state { margin-top: 4px; color: #63776b; font-size: var(--gbay-meta); font-weight: 750; text-transform: uppercase; }
+.gbay-product-state.equip, .gbay-product-state.purchase, .gbay-product-state.available { color: #176b36; }
 .gbay-product-state.unequip, .gbay-product-state.owned { color: #716829; }
 .gbay-gear-toolbar { grid-template-columns: auto 1fr; color: #24412f; }
-.gbay-gear-toolbar > strong { font-size: 11px; text-transform: uppercase; }
-.gbay-gear-toolbar > span { color: #66766d; font-size: 9px; }
+.gbay-gear-toolbar > strong { font-size: var(--gbay-meta); text-transform: uppercase; }
+.gbay-gear-toolbar > span { color: #66766d; font-size: var(--gbay-meta); }
 .gbay-product-card.gear .gbay-card-visual { background: #dce4de; }
 .gbay-product-card.gear .gbay-card-visual img { object-fit: cover; }
 .gbay-product-card.gear.owned { border-color: #9cae58; }
@@ -1119,8 +1124,8 @@ html[data-reactor-browser-role="gpu-renderer"]
   top: 7px;
   padding: 5px 8px;
   color: white;
-  background: #27a653;
-  font: normal 800 8px/1 inherit;
+  background: #18783e;
+  font: normal 800 var(--gbay-meta)/1 var(--ui-body-font);
   letter-spacing: .035em;
 }
 
@@ -1148,13 +1153,13 @@ html[data-reactor-browser-role="gpu-renderer"]
   border: 1px solid #9fc4aa;
   background: #e5f4e9;
 }
-.gbay-workbench-preview-status > i { grid-row: 1 / 3; width: 7px; height: 7px; border-radius: 50%; background: #27a653; box-shadow: 0 0 0 3px rgba(39, 166, 83, .16); }
-.gbay-workbench-preview-status > small { color: #27864c; font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }
-.gbay-workbench-preview-status > strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-workbench-header small { color: #27864c; font-size: 8px; font-weight: 800; letter-spacing: .14em; }
-.gbay-workbench-header h1 { margin: 3px 0; overflow: hidden; font-family: var(--gta-display-font); font-size: 20px; font-weight: 900; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-workbench-header p { margin: 0; color: #64756b; font-size: 9px; }
-.gbay-workbench-header > button { min-width: 116px; height: 34px; color: #244531; border: 1px solid #9fb7a8; background: #e3ece6; font: 700 9px/1 inherit; }
+.gbay-workbench-preview-status > i { grid-row: 1 / 3; width: 7px; height: 7px; border-radius: 50%; background: #18783e; box-shadow: 0 0 0 3px rgba(39, 166, 83, .16); }
+.gbay-workbench-preview-status > small { color: #176b36; font-size: var(--gbay-meta); letter-spacing: .08em; text-transform: uppercase; }
+.gbay-workbench-preview-status > strong { overflow: hidden; font-size: var(--gbay-meta); text-overflow: ellipsis; white-space: nowrap; }
+.gbay-workbench-header small { color: #176b36; font-size: var(--gbay-meta); font-weight: 800; letter-spacing: .14em; }
+.gbay-workbench-header h1 { margin: 3px 0; overflow: hidden; font-family: var(--gta-display-font); font-size: var(--gbay-title); font-weight: 900; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-workbench-header p { margin: 0; color: #64756b; font-size: var(--gbay-meta); }
+.gbay-workbench-header > button { min-width: 116px; height: 34px; color: #244531; border: 1px solid #9fb7a8; background: #e3ece6; font: 700 var(--gbay-meta)/1 var(--ui-body-font); }
 .gbay-workbench-header > button:hover, .gbay-workbench-header > button.focused { color: white; border-color: #15552f; background: #27864c; outline: 2px solid #65d88c; }
 .gbay-customize-weapons { padding-top: 16px; }
 .gbay-customize-weapon {
@@ -1174,8 +1179,8 @@ html[data-reactor-browser-role="gpu-renderer"]
   box-shadow: 3px 4px 0 rgba(2, 18, 9, .10);
 }
 .gbay-customize-weapon > .gbay-customize-weapon-mark { color: #2d8650; font-size: 38px; }
-.gbay-customize-weapon > small { width: 100%; overflow: hidden; color: #678075; font-size: 7px; letter-spacing: .12em; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-customize-weapon > strong { max-width: 100%; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-customize-weapon > small { width: 100%; overflow: hidden; color: #678075; font-size: var(--gbay-meta); letter-spacing: .12em; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-customize-weapon > strong { max-width: 100%; overflow: hidden; font-size: var(--gbay-body); text-overflow: ellipsis; white-space: nowrap; }
 .gbay-customize-weapon > .gbay-customize-weapon-tool {
   position: absolute;
   right: 10px;
@@ -1193,7 +1198,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   transform: translateY(-50%);
 }
 .gbay-customize-weapon-tool .gbay-wrench-icon { width: 15px; height: 15px; }
-.gbay-customize-weapon:hover, .gbay-customize-weapon.focused { border-color: #24854a; background: #e5f4e9; outline: 2px solid #35ab5f; outline-offset: 1px; }
+.gbay-customize-weapon:hover, .gbay-customize-weapon.focused { border-color: #176b36; background: #e5f4e9; outline: 2px solid #35ab5f; outline-offset: 1px; }
 .gbay-customize-weapon:hover > .gbay-customize-weapon-tool,
 .gbay-customize-weapon.focused > .gbay-customize-weapon-tool { border-color: #0f4e28; background: #155f34; }
 @media (max-width: 760px) {
@@ -1214,7 +1219,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   border: 0;
   border-bottom: 4px solid transparent;
   background: transparent;
-  font: 750 9px/1 inherit;
+  font: 750 var(--gbay-meta)/1 var(--ui-body-font);
   text-transform: uppercase;
 }
 .gbay-workbench-tabs button:hover, .gbay-workbench-tabs button.focused { color: #164e2c; background: #edf4ef; }
@@ -1240,11 +1245,11 @@ html[data-reactor-browser-role="gpu-renderer"]
 .gbay-workbench-card:hover, .gbay-workbench-card.focused { border-color: #25864b; background: #e7f4eb; outline: 2px solid #37ad61; outline-offset: 1px; }
 .gbay-workbench-card.owned { border-left-color: #b89b36; }
 .gbay-workbench-card.equipped { border-left-color: #27a354; background: #e5f5e9; }
-.gbay-workbench-card-mark { grid-row: 1 / -1; display: grid; place-items: center; width: 48px; height: 48px; color: white; background: #235f3a; font-size: 20px; }
-.gbay-workbench-card > small { color: #6b7d72; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
-.gbay-workbench-card > strong { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-workbench-card-state { color: #367c50; font-size: 8px; font-weight: 750; text-transform: uppercase; }
-.gbay-workbench-card > em { grid-column: 3; grid-row: 1 / -1; padding: 6px 8px; color: #247f46; background: #dfefe4; font: normal 800 9px/1 inherit; }
+.gbay-workbench-card-mark { grid-row: 1 / -1; display: grid; place-items: center; width: 48px; height: 48px; color: white; background: #235f3a; font-size: var(--gbay-title); }
+.gbay-workbench-card > small { color: #6b7d72; font-size: var(--gbay-meta); letter-spacing: .1em; text-transform: uppercase; }
+.gbay-workbench-card > strong { min-width: 0; overflow: hidden; font-size: var(--gbay-body); text-overflow: ellipsis; white-space: nowrap; }
+.gbay-workbench-card-state { color: #367c50; font-size: var(--gbay-meta); font-weight: 750; text-transform: uppercase; }
+.gbay-workbench-card > em { grid-column: 3; grid-row: 1 / -1; padding: 6px 8px; color: #247f46; background: #dfefe4; font: normal 800 var(--gbay-meta)/1 var(--ui-body-font); }
 
 .gbay-garage-page {
   flex: 1;
@@ -1276,15 +1281,15 @@ html[data-reactor-browser-role="gpu-renderer"]
   padding: 9px 12px;
   color: white;
   border-bottom: 1px solid #126233;
-  background: #27a653;
+  background: #18783e;
 }
 .gbay-garage-storage > header span,
 .gbay-garage-collection > header span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .gbay-garage-storage > header small,
-.gbay-garage-collection > header small { color: #d8f4e1; font-size: 7px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.gbay-garage-collection > header small { color: #d8f4e1; font-size: var(--gbay-meta); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .gbay-garage-storage > header strong,
-.gbay-garage-collection > header strong { overflow: hidden; font-family: var(--gta-display-font); font-size: 13px; letter-spacing: .025em; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-garage-storage > header button { width: 30px; height: 30px; color: white; border: 1px solid rgba(255,255,255,.45); background: #1d7f43; font-size: 17px; }
+.gbay-garage-collection > header strong { overflow: hidden; font-family: var(--gta-display-font); font-size: var(--gbay-body); letter-spacing: .025em; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-storage > header button { width: 30px; height: 30px; color: white; border: 1px solid rgba(255,255,255,.45); background: #1d7f43; font-size: var(--gbay-label); }
 .gbay-garage-storage > nav { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 5px; padding: 8px; overflow-y: auto; }
 .gbay-garage-location-row { display: grid; grid-template-columns: minmax(0, 1fr) 31px; gap: 4px; }
 .gbay-garage-storage > nav button {
@@ -1303,9 +1308,9 @@ html[data-reactor-browser-role="gpu-renderer"]
 }
 .gbay-garage-storage > nav button:hover,
 .gbay-garage-storage > nav button.focused { border-color: #25884c; background: #e7f4eb; outline: 2px solid #39ad62; outline-offset: -2px; }
-.gbay-garage-storage > nav button.active { border-color: #208146; border-left-color: #27a653; background: #e2f3e7; }
-.gbay-garage-storage > nav button span { overflow: hidden; font-size: 10px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-garage-storage > nav button em { color: #238146; font: normal 800 8px/1 inherit; text-transform: uppercase; }
+.gbay-garage-storage > nav button.active { border-color: #208146; border-left-color: #18783e; background: #e2f3e7; }
+.gbay-garage-storage > nav button span { overflow: hidden; font-size: var(--gbay-meta); font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-storage > nav button em { color: #176b36; font: normal 800 var(--gbay-meta)/1 var(--ui-body-font); text-transform: uppercase; }
 .gbay-garage-storage > nav button:disabled { opacity: .48; }
 .gbay-garage-storage > nav .gbay-garage-waypoint {
   justify-content: center;
@@ -1313,7 +1318,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   color: #fff;
   border-color: #1f7c44;
   background: #25884c;
-  font-size: 15px;
+  font-size: var(--gbay-body);
 }
 .gbay-garage-storage > nav .gbay-garage-waypoint:hover,
 .gbay-garage-storage > nav .gbay-garage-waypoint.focused { background: #176d38; }
@@ -1351,14 +1356,14 @@ html[data-reactor-browser-role="gpu-renderer"]
   height: 34px;
   color: white;
   background: #287e49;
-  font-size: 15px;
+  font-size: var(--gbay-body);
 }
 .gbay-garage-interior > span:last-child,
 .gbay-garage-recovery > span:nth-child(2),
 .gbay-garage-customization > label > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.gbay-garage-services small { color: #27834b; font-size: 6px; font-weight: 800; letter-spacing: .12em; }
-.gbay-garage-services strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-garage-services em { overflow: hidden; color: #66766c; font: normal 7px/1.3 inherit; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-services small { color: #27834b; font-size: var(--gbay-meta); font-weight: 800; letter-spacing: .12em; }
+.gbay-garage-services strong { overflow: hidden; font-size: var(--gbay-meta); text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-services em { overflow: hidden; color: #66766c; font: normal var(--gbay-meta)/1.3 var(--ui-body-font); text-overflow: ellipsis; white-space: nowrap; }
 .gbay-garage-customization { display: flex; align-items: stretch; gap: 7px; }
 .gbay-garage-customization > label {
   min-width: 170px;
@@ -1370,7 +1375,7 @@ html[data-reactor-browser-role="gpu-renderer"]
 }
 .gbay-garage-customization > label > em { grid-column: 1 / -1; }
 .gbay-garage-customization > label.focused { border-color: #25884c; background: #e7f4eb; outline: 2px solid #39ad62; outline-offset: -2px; }
-.gbay-garage-customization select { min-width: 0; height: 29px; color: #23392c; border: 1px solid #9eb1a5; background: white; font-size: 8px; }
+.gbay-garage-customization select { min-width: 0; height: 29px; color: #23392c; border: 1px solid #9eb1a5; background: white; font-size: var(--gbay-meta); }
 .gbay-garage-recovery {
   min-width: 230px;
   display: grid;
@@ -1382,7 +1387,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   cursor: pointer;
 }
 .gbay-garage-recovery > span:first-child { display: grid; place-items: center; width: 27px; height: 27px; color: white; background: #ad4e49; font-weight: 900; }
-.gbay-garage-recovery b { padding: 7px 8px; color: white; background: #ad4e49; font-size: 7px; }
+.gbay-garage-recovery b { padding: 7px 8px; color: white; background: #ad4e49; font-size: var(--gbay-meta); }
 .gbay-garage-recovery:hover,
 .gbay-garage-recovery.focused { border-color: #973f3a; background: #faeceb; outline: 2px solid #c65a54; outline-offset: -2px; }
 .gbay-garage-recovery:disabled { opacity: .48; cursor: not-allowed; }
@@ -1419,15 +1424,15 @@ html[data-reactor-browser-role="gpu-renderer"]
 .gbay-garage-grid > article.focused { border-color: #238549; background: #e6f4ea; outline: 2px solid #36ac60; outline-offset: -2px; }
 .gbay-garage-grid > article.protected { border-left-color: #8a9a91; }
 .gbay-garage-grid > article > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.gbay-garage-grid strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-garage-grid small { overflow: hidden; color: #248149; font-size: 7px; font-weight: 750; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.gbay-garage-grid span:nth-child(2) > em { overflow: hidden; color: #66776d; font: normal 8px/1.3 inherit; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-grid strong { overflow: hidden; font-size: var(--gbay-body); text-overflow: ellipsis; white-space: nowrap; }
+.gbay-garage-grid small { overflow: hidden; color: #248149; font-size: var(--gbay-meta); font-weight: 750; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.gbay-garage-grid span:nth-child(2) > em { overflow: hidden; color: #66776d; font: normal var(--gbay-meta)/1.3 var(--ui-body-font); text-overflow: ellipsis; white-space: nowrap; }
 .gbay-garage-actions { display: flex; align-items: stretch; gap: 5px; }
-.gbay-garage-actions button { min-width: 78px; height: 34px; padding: 5px 8px; color: white; border: 1px solid #16683a; background: #27864c; font: 800 7px/1 inherit; }
+.gbay-garage-actions button { min-width: 78px; height: 34px; padding: 5px 8px; color: white; border: 1px solid #16683a; background: #27864c; font: 800 var(--gbay-meta)/1 var(--ui-body-font); }
 .gbay-garage-actions button.sell { border-color: #8b403b; background: #b9514d; }
 .gbay-garage-actions button:hover { filter: brightness(1.08); outline: 2px solid #58c77e; outline-offset: 1px; }
-.gbay-garage-protected { padding: 6px 8px; color: #66766d; background: #e8eeea; font-size: 7px; font-weight: 800; }
-.gbay-garage-vehicle-mark { display: grid; place-items: center; width: 40px; height: 40px; color: #80d89e; background: #174e2e; font-size: 15px; }
+.gbay-garage-protected { padding: 6px 8px; color: #66766d; background: #e8eeea; font-size: var(--gbay-meta); font-weight: 800; }
+.gbay-garage-vehicle-mark { display: grid; place-items: center; width: 40px; height: 40px; color: #80d89e; background: #174e2e; font-size: var(--gbay-body); }
 .gbay-garage-collection > .gbay-catalog-footer { flex: 0 0 auto; }
 
 .gbay-delivery-page { padding: clamp(18px, 3vh, 34px); overflow-y: auto; }
@@ -1446,9 +1451,9 @@ html[data-reactor-browser-role="gpu-renderer"]
   border-top: 5px solid #258349;
   background: #fbfdfb;
 }
-.gbay-delivery-grid > button > span { color: #258349; font-size: 21px; }
-.gbay-delivery-grid > button > strong { font-size: 14px; }
-.gbay-delivery-grid > button > small { color: #607168; font-size: 9px; line-height: 1.4; }
+.gbay-delivery-grid > button > span { color: #258349; font-size: var(--gbay-title); }
+.gbay-delivery-grid > button > strong { font-size: var(--gbay-body); }
+.gbay-delivery-grid > button > small { color: #607168; font-size: var(--gbay-meta); line-height: 1.4; }
 .gbay-delivery-grid > button:hover, .gbay-delivery-grid > button.focused { border-color: #22854a; background: #e5f4ea; outline: 2px solid #2da958; }
 
 .gbay-about {
@@ -1476,16 +1481,16 @@ html[data-reactor-browser-role="gpu-renderer"]
   padding: 10px 16px;
   color: white;
   border: 1px solid #176c39;
-  background: #29a553;
+  background: #18783e;
   box-shadow: 0 4px 0 #b3c2b8;
-  font: 800 17px/1 var(--gta-display-font);
+  font: 800 var(--gbay-label)/1 var(--gta-display-font);
   letter-spacing: .045em;
 }
 .gbay-about-hero p {
   max-width: 720px;
   margin: 5px 0 0;
   color: #526a5c;
-  font-size: 11px;
+  font-size: var(--gbay-meta);
   line-height: 1.45;
 }
 .gbay-about-diagnostics {
@@ -1513,14 +1518,14 @@ html[data-reactor-browser-role="gpu-renderer"]
 .gbay-about-fact small,
 .gbay-about-credit small,
 .gbay-about-support small {
-  color: #27864c;
-  font-size: 8px;
+  color: #176b36;
+  font-size: var(--gbay-meta);
   font-weight: 800;
   letter-spacing: .11em;
   text-transform: uppercase;
 }
-.gbay-about-fact strong { font-size: 12px; overflow-wrap: anywhere; }
-.gbay-about-fact span { color: #718078; font-size: 8px; }
+.gbay-about-fact strong { font-size: var(--gbay-body); overflow-wrap: anywhere; }
+.gbay-about-fact span { color: #52685a; font-size: var(--gbay-meta); }
 .gbay-about-credit {
   width: min(900px, 100%);
   min-height: 62px;
@@ -1531,7 +1536,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   gap: 4px;
   padding: 10px;
 }
-.gbay-about-credit strong { font-size: 13px; }
+.gbay-about-credit strong { font-size: var(--gbay-body); }
 .gbay-about-support {
   width: min(900px, 100%);
   min-height: 74px;
@@ -1542,8 +1547,8 @@ html[data-reactor-browser-role="gpu-renderer"]
   padding: 11px 13px;
 }
 .gbay-about-support > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.gbay-about-support strong { overflow: hidden; color: #26844a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.gbay-about-support em { color: #6a7b70; font: normal 8px/1.35 inherit; }
+.gbay-about-support strong { overflow: hidden; color: #176b36; font-size: var(--gbay-meta); text-overflow: ellipsis; white-space: nowrap; }
+.gbay-about-support em { color: #52685a; font: normal var(--gbay-meta)/1.35 var(--ui-body-font); }
 .gbay-about-support button {
   min-width: 148px;
   height: 38px;
@@ -1551,7 +1556,7 @@ html[data-reactor-browser-role="gpu-renderer"]
   color: white;
   border: 1px solid #15552f;
   background: #27864c;
-  font: 750 9px/1 inherit;
+  font: 750 var(--gbay-meta)/1 var(--ui-body-font);
   cursor: pointer;
 }
 .gbay-about-support button:hover,
@@ -1566,7 +1571,7 @@ html[data-reactor-browser-role="gpu-renderer"]
 @media (max-width: 760px), (max-height: 640px) {
   .gbay-about { gap: 9px; padding: 12px; }
   .gbay-about-hero img { width: 92px; height: 58px; }
-  .gbay-about-hero > span { padding: 7px 12px; font-size: 14px; }
+  .gbay-about-hero > span { padding: 7px 12px; font-size: var(--gbay-body); }
   .gbay-about-diagnostics { grid-template-columns: 1fr; }
   .gbay-about-fact { min-height: 48px; display: grid; grid-template-columns: 1fr 1fr; text-align: left; }
   .gbay-about-fact span { display: none; }
@@ -1589,16 +1594,16 @@ html[data-reactor-browser-role="gpu-renderer"]
   background: #fbfdfb;
 }
 button.gbay-panel-item { width: 100%; cursor: pointer; }
-.gbay-panel-item:hover, .gbay-panel-item.focused { border-color: #27864c; background: #e7f4eb; outline: 2px solid #35aa5e; outline-offset: -2px; }
+.gbay-panel-item:hover, .gbay-panel-item.focused { border-color: #176b36; background: #e7f4eb; outline: 2px solid #35aa5e; outline-offset: -2px; }
 .gbay-panel-item > span:first-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.gbay-panel-item strong { font-size: 11px; }
-.gbay-panel-item small { color: #687a70; font-size: 8px; line-height: 1.35; }
-.gbay-panel-item > em { color: #27864c; font: normal 700 16px/1 inherit; }
-.gbay-panel-item > em.on { min-width: 38px; padding: 5px 7px; color: white; text-align: center; background: #27864c; font-size: 8px; }
+.gbay-panel-item strong { font-size: var(--gbay-meta); }
+.gbay-panel-item small { color: #52685a; font-size: var(--gbay-meta); line-height: 1.35; }
+.gbay-panel-item > em { color: #176b36; font: normal 700 var(--gbay-label)/1 var(--ui-body-font); }
+.gbay-panel-item > em.on { min-width: 38px; padding: 5px 7px; color: white; text-align: center; background: #27864c; font-size: var(--gbay-meta); }
 .gbay-panel-item select, .gbay-panel-item input[type="text"], .gbay-panel-item input[type="search"] { max-width: 48%; height: 31px; color: #20372a; border: 1px solid #aebfb5; background: white; }
 .gbay-range { min-width: 48%; display: flex; align-items: center; gap: 8px; }
-.gbay-range input { flex: 1; accent-color: #26844a; }
-.gbay-range output, .gbay-panel-item output { color: #26844a; font-size: 10px; font-weight: 700; }
+.gbay-range input { flex: 1; accent-color: #176b36; }
+.gbay-range output, .gbay-panel-item output { color: #176b36; font-size: var(--gbay-meta); font-weight: 700; }
 .gbay-inline-pager { display: flex; align-items: center; gap: 6px; }
 .gbay-inline-pager button { width: 28px; height: 28px; color: white; border: 0; background: #27864c; }
 .gbay-entry-control { grid-column: 1 / -1; align-items: flex-start; }
@@ -1609,7 +1614,7 @@ button.gbay-panel-item { width: 100%; cursor: pointer; }
 .gbay-entry-image-placeholder { width: 42px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; }
 .gbay-panel-media { min-height: 150px; margin: 0; padding: 10px; border: 1px solid #bdcac2; background: #fff; }
 .gbay-panel-media img { width: 100%; height: 120px; display: block; object-fit: contain; }
-.gbay-panel-media figcaption { margin-top: 5px; color: #617268; font-size: 8px; }
+.gbay-panel-media figcaption { margin-top: 5px; color: #52685a; font-size: var(--gbay-meta); }
 .gbay-separator { grid-column: 1 / -1; width: 100%; border: 0; border-top: 1px solid #bdcac2; }
 .gbay-shell > .gbay-message { flex: 1; }
 
@@ -1619,9 +1624,9 @@ button.gbay-panel-item { width: 100%; cursor: pointer; }
   .gbay-shell { width: calc(100vw - 24px); height: calc(100vh - 24px); min-height: 0; }
   .gbay-brand span, .gbay-hints, .gbay-state { display: none; }
   .gbay-catalog { gap: 7px; padding: 7px; }
-  .gbay-card-copy strong { font-size: 12px; }
+  .gbay-card-copy strong { font-size: var(--gbay-body); }
   .gbay-section-nav { min-height: 38px; }
-  .gbay-section-nav button { padding: 0 9px; font-size: 8px; }
+  .gbay-section-nav button { padding: 0 9px; font-size: var(--gbay-meta); }
   .gbay-home, .gbay-delivery-page { padding: 14px; }
 }
 
@@ -1697,7 +1702,7 @@ button.gbay-panel-item { width: 100%; cursor: pointer; }
   border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 9px;
   background: rgba(255, 255, 255, .035);
-  font: 400 25px/1 inherit;
+  font: 400 25px/1 var(--ui-body-font);
   cursor: pointer;
 }
 .menu-back:hover, .menu-close:hover { color: white; border-color: rgba(38, 168, 255, .4); background: rgba(38, 168, 255, .12); }
@@ -1761,7 +1766,7 @@ button.menu-item { cursor: pointer; }
   border-radius: 7px;
   outline: none;
   background: #0a171f;
-  font: 11px inherit;
+  font: 11px var(--ui-body-font);
 }
 .menu-item select:focus, .menu-item input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(38, 168, 255, .13); }
 .menu-range-control { min-width: 190px; display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 8px; }
@@ -1886,8 +1891,8 @@ button.menu-item { cursor: pointer; }
   background: #0f572d;
 }
 .gbay-confirmation-header > span:last-child { display: grid; gap: 3px; }
-.gbay-confirmation-header small { color: #a7edbc; font-size: 9px; letter-spacing: .14em; }
-.gbay-confirmation-header strong { font-family: var(--gta-display-font); font-size: 21px; letter-spacing: .02em; text-transform: uppercase; }
+.gbay-confirmation-header small { color: #a7edbc; font-size: var(--gbay-meta); letter-spacing: .14em; }
+.gbay-confirmation-header strong { font-family: var(--gta-display-font); font-size: var(--gbay-title); letter-spacing: .02em; text-transform: uppercase; }
 .gbay-confirmation-mark {
   width: 38px;
   height: 38px;
@@ -1897,12 +1902,12 @@ button.menu-item { cursor: pointer; }
   color: #0f572d;
   border: 2px solid #dff5e6;
   background: #fff;
-  font: 900 24px/1 var(--gta-display-font);
+  font: 900 var(--gbay-title)/1 var(--gta-display-font);
 }
 .gbay-confirmation-copy { padding: 22px 24px 18px; }
-.gbay-confirmation-copy > small { color: #1b7c42; font-size: 10px; font-weight: 850; letter-spacing: .13em; }
-.gbay-confirmation-copy h2 { margin: 8px 0 7px; color: #142c1f; font-size: 25px; }
-.gbay-confirmation-copy p { margin: 0; color: #40594b; font-size: 13px; line-height: 1.55; }
+.gbay-confirmation-copy > small { color: #1b7c42; font-size: var(--gbay-meta); font-weight: 850; letter-spacing: .13em; }
+.gbay-confirmation-copy h2 { margin: 8px 0 7px; color: #142c1f; font-size: var(--gbay-title); }
+.gbay-confirmation-copy p { margin: 0; color: #40594b; font-size: var(--gbay-body); line-height: 1.55; }
 .gbay-confirmation-actions {
   padding: 12px 16px;
   border-top: 1px solid #bdcbc2;
@@ -1915,11 +1920,11 @@ button.menu-item { cursor: pointer; }
   border: 1px solid #9db3a5;
   border-radius: 0;
   background: #f8faf9;
-  font-size: 11px;
+  font-size: var(--gbay-meta);
   font-weight: 800;
   text-transform: uppercase;
 }
-.gbay-confirmation-actions button.primary { color: #fff; border-color: #146d38; background: #1e8f49; }
+.gbay-confirmation-actions button.primary { color: #fff; border-color: #146d38; background: #176b36; }
 .gbay-confirmation-actions button:focus-visible { outline: 3px solid #53d27c; outline-offset: 2px; }
 
 .search-keyboard-overlay {
@@ -1983,7 +1988,7 @@ button.menu-item { cursor: pointer; }
   border-radius: 4px;
   outline: 0;
   background: white;
-  font: 700 15px/1 inherit;
+  font: 700 15px/1 var(--ui-body-font);
 }
 .search-keyboard-draft:focus { border-color: #168044; box-shadow: 0 0 0 2px rgba(22, 128, 68, .16); }
 .search-keyboard-grid { display: grid; gap: 5px; }
@@ -1996,7 +2001,7 @@ button.menu-item { cursor: pointer; }
   border: 1px solid #b5c8bc;
   border-radius: 4px;
   background: white;
-  font: 800 11px/1 inherit;
+  font: 800 11px/1 var(--ui-body-font);
 }
 .search-keyboard-key.kind-space,
 .search-keyboard-key.kind-backspace,
@@ -2063,15 +2068,15 @@ button.menu-item { cursor: pointer; }
   border-bottom-width: 2px;
 }
 .gbay-customizer-shell .gbay-brand { gap: 9px; }
-.gbay-customizer-shell .gbay-brand strong { font-size: 25px; }
-.gbay-customizer-shell .gbay-brand span { color: #e2f0e7; font-size: 9px; letter-spacing: .075em; }
+.gbay-customizer-shell .gbay-brand strong { font-size: var(--gbay-title); }
+.gbay-customizer-shell .gbay-brand span { color: #e2f0e7; font-size: var(--gbay-meta); letter-spacing: .075em; }
 .gbay-customizer-shell .gbay-section { display: none; }
 .gbay-customizer-shell .gbay-balance { min-width: 0; }
-.gbay-customizer-shell .gbay-balance small { color: #e0f0e5; font-size: 8px; }
-.gbay-customizer-shell .gbay-balance strong { max-width: 145px; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-customizer-shell .gbay-balance small { color: #e0f0e5; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-balance strong { max-width: 145px; overflow: hidden; font-size: var(--gbay-body); text-overflow: ellipsis; white-space: nowrap; }
 .gbay-customizer-shell .gbay-section-nav { min-height: 39px; padding: 0 5px; }
-.gbay-customizer-shell .gbay-section-nav button { gap: 4px; padding: 0 8px; color: #e2f0e7; font-size: 9px; }
-.gbay-customizer-shell .gbay-section-nav button span { color: #91e5ad; font-size: 12px; }
+.gbay-customizer-shell .gbay-section-nav button { gap: 4px; padding: 0 8px; color: #e2f0e7; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-section-nav button span { color: #91e5ad; font-size: var(--gbay-body); }
 .gbay-customizer-shell .gbay-section-nav button.gbay-nav-tool {
   width: 29px;
   min-width: 29px;
@@ -2084,18 +2089,18 @@ button.menu-item { cursor: pointer; }
   gap: 8px;
   padding: 9px 11px;
 }
-.gbay-customizer-shell .gbay-workbench-header small { color: #176f3a; font-size: 9px; }
-.gbay-customizer-shell .gbay-workbench-header h1 { margin: 2px 0 0; font-size: 20px; }
+.gbay-customizer-shell .gbay-workbench-header small { color: #176f3a; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-workbench-header h1 { margin: 2px 0 0; font-size: var(--gbay-title); }
 .gbay-customizer-shell .gbay-workbench-header p { display: none; }
-.gbay-customizer-shell .gbay-workbench-header > button { min-width: 96px; height: 31px; padding: 0 9px; font-size: 10px; }
+.gbay-customizer-shell .gbay-workbench-header > button { min-width: 96px; height: 31px; padding: 0 9px; font-size: var(--gbay-meta); }
 .gbay-customizer-shell .gbay-workbench-header > .gbay-workbench-preview-status {
   min-width: 124px;
   padding: 6px 8px;
 }
-.gbay-customizer-shell .gbay-workbench-preview-status > small { color: #176f3a; font-size: 8px; }
-.gbay-customizer-shell .gbay-workbench-preview-status > strong { max-width: 124px; color: #173d28; font-size: 10px; }
+.gbay-customizer-shell .gbay-workbench-preview-status > small { color: #176f3a; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-workbench-preview-status > strong { max-width: 124px; color: #173d28; font-size: var(--gbay-meta); }
 .gbay-customizer-shell .gbay-tabs { min-height: 38px; padding: 0 5px; }
-.gbay-customizer-shell .gbay-tabs button { padding: 0 9px; color: #e3f0e8; font-size: 9px; }
+.gbay-customizer-shell .gbay-tabs button { padding: 0 9px; color: #e3f0e8; font-size: var(--gbay-meta); }
 .gbay-customizer-shell .gbay-toolbar {
   min-height: 43px;
   grid-template-columns: 1fr;
@@ -2133,7 +2138,7 @@ button.menu-item { cursor: pointer; }
   background: linear-gradient(145deg, #e4ebe7, #d4dfd8);
 }
 .gbay-customize-weapon-visual img { width: 100%; height: 100%; display: block; object-fit: contain; }
-.gbay-customize-weapon-visual > .gbay-customize-weapon-mark { color: #2d8650; font-size: 25px; }
+.gbay-customize-weapon-visual > .gbay-customize-weapon-mark { color: #2d8650; font-size: var(--gbay-title); }
 .gbay-customize-weapon-copy {
   min-width: 0;
   display: flex;
@@ -2144,7 +2149,7 @@ button.menu-item { cursor: pointer; }
 .gbay-customize-weapon-copy > small {
   overflow: hidden;
   color: #40594c;
-  font-size: 9px;
+  font-size: var(--gbay-meta);
   font-weight: 700;
   letter-spacing: .055em;
   text-overflow: ellipsis;
@@ -2153,7 +2158,7 @@ button.menu-item { cursor: pointer; }
 .gbay-customize-weapon-copy > strong {
   overflow: hidden;
   color: #20382a;
-  font-size: 14px;
+  font-size: var(--gbay-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2175,7 +2180,7 @@ button.menu-item { cursor: pointer; }
   overflow-x: auto;
   padding: 0 6px;
 }
-.gbay-customizer-shell .gbay-workbench-tabs button { flex: 1 0 94px; color: #314c3d; font-size: 9px; }
+.gbay-customizer-shell .gbay-workbench-tabs button { flex: 1 0 94px; color: #314c3d; font-size: var(--gbay-meta); }
 .gbay-customizer-shell .gbay-workbench-options {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: none;
@@ -2192,11 +2197,11 @@ button.menu-item { cursor: pointer; }
   padding: 8px 9px;
   box-shadow: 2px 2px 0 rgba(2, 18, 9, .10);
 }
-.gbay-customizer-shell .gbay-workbench-card-mark { width: 40px; height: 40px; font-size: 17px; }
-.gbay-customizer-shell .gbay-workbench-card > small { color: #42594d; font-size: 9px; }
-.gbay-customizer-shell .gbay-workbench-card > strong { color: #172d21; font-size: 13px; }
-.gbay-customizer-shell .gbay-workbench-card-state { color: #176b3a; font-size: 9px; }
-.gbay-customizer-shell .gbay-workbench-card > em { padding: 6px 8px; color: #145f34; background: #d7ebdd; font-size: 9px; }
+.gbay-customizer-shell .gbay-workbench-card-mark { width: 40px; height: 40px; font-size: var(--gbay-label); }
+.gbay-customizer-shell .gbay-workbench-card > small { color: #42594d; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-workbench-card > strong { color: #172d21; font-size: var(--gbay-body); }
+.gbay-customizer-shell .gbay-workbench-card-state { color: #176b3a; font-size: var(--gbay-meta); }
+.gbay-customizer-shell .gbay-workbench-card > em { padding: 6px 8px; color: #145f34; background: #d7ebdd; font-size: var(--gbay-meta); }
 .gbay-customizer-shell .gbay-workbench-card.focused {
   border-color: #176f3a;
   border-left-color: #49cf75;
@@ -2213,7 +2218,7 @@ button.menu-item { cursor: pointer; }
   padding: 4px 7px;
 }
 .gbay-customizer-shell .gbay-hints { display: none; }
-.gbay-customizer-shell .gbay-close { min-width: 68px; height: 29px; font-size: 10px; }
+.gbay-customizer-shell .gbay-close { min-width: 68px; height: 29px; font-size: var(--gbay-meta); }
 
 @media (max-width: 540px) {
   .gbay-customizer-stage { align-items: stretch; padding: 8px; }
@@ -2287,13 +2292,13 @@ button.menu-item { cursor: pointer; }
 .gbay-weapon-editor-title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .gbay-weapon-editor-title small {
   color: #a9e8bd;
-  font-size: 11px;
+  font-size: var(--gbay-meta);
   font-weight: 850;
   letter-spacing: .13em;
 }
 .gbay-weapon-editor-title strong {
   overflow: hidden;
-  font: 400 29px/1 var(--gta-display-font);
+  font: 400 var(--gbay-title)/1 var(--gta-display-font);
   letter-spacing: .045em;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -2306,8 +2311,8 @@ button.menu-item { cursor: pointer; }
   align-items: flex-end;
   gap: 3px;
 }
-.gbay-weapon-editor-account small { color: #bce7c9; font-size: 10px; font-weight: 750; letter-spacing: .07em; }
-.gbay-weapon-editor-account strong { max-width: 175px; overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.gbay-weapon-editor-account small { color: #bce7c9; font-size: var(--gbay-meta); font-weight: 750; letter-spacing: .07em; }
+.gbay-weapon-editor-account strong { max-width: 175px; overflow: hidden; font-size: var(--gbay-label); text-overflow: ellipsis; white-space: nowrap; }
 .gbay-weapon-editor-actions { display: flex; gap: 7px; }
 .gbay-weapon-editor-actions button {
   min-width: 42px;
@@ -2316,10 +2321,10 @@ button.menu-item { cursor: pointer; }
   color: white;
   border: 1px solid #63bd82;
   background: #1b683a;
-  font: 800 12px/1 inherit;
+  font: 800 var(--gbay-body)/1 var(--ui-body-font);
   cursor: pointer;
 }
-.gbay-weapon-editor-actions button:last-child { padding: 0; font-size: 24px; }
+.gbay-weapon-editor-actions button:last-child { padding: 0; font-size: var(--gbay-title); }
 .gbay-weapon-editor-actions button:hover,
 .gbay-weapon-editor-actions button.focused {
   border-color: white;
@@ -2334,30 +2339,30 @@ button.menu-item { cursor: pointer; }
   gap: 14px;
   padding: 15px 17px;
 }
-.gbay-weapon-editor-shell .gbay-workbench-header small { color: #176f3a; font-size: 11px; }
-.gbay-weapon-editor-shell .gbay-workbench-header h1 { margin: 3px 0; font-size: 29px; }
-.gbay-weapon-editor-shell .gbay-workbench-header p { color: #4f695a; font-size: 12px; line-height: 1.35; }
+.gbay-weapon-editor-shell .gbay-workbench-header small { color: #176f3a; font-size: var(--gbay-meta); }
+.gbay-weapon-editor-shell .gbay-workbench-header h1 { margin: 3px 0; font-size: var(--gbay-title); }
+.gbay-weapon-editor-shell .gbay-workbench-header p { color: #4f695a; font-size: var(--gbay-body); line-height: 1.35; }
 .gbay-weapon-editor-shell .gbay-workbench-header > button {
   min-width: 130px;
   height: 42px;
   padding: 0 13px;
-  font-size: 12px;
+  font-size: var(--gbay-body);
 }
 .gbay-weapon-editor-shell .gbay-workbench-header > .gbay-workbench-preview-status {
   min-width: 165px;
   padding: 10px 12px;
 }
-.gbay-weapon-editor-shell .gbay-workbench-preview-status > small { color: #176f3a; font-size: 10px; }
-.gbay-weapon-editor-shell .gbay-workbench-preview-status > strong { max-width: 165px; color: #173d28; font-size: 12px; }
+.gbay-weapon-editor-shell .gbay-workbench-preview-status > small { color: #176f3a; font-size: var(--gbay-meta); }
+.gbay-weapon-editor-shell .gbay-workbench-preview-status > strong { max-width: 165px; color: #173d28; font-size: var(--gbay-body); }
 .gbay-weapon-editor-shell .gbay-tabs { min-height: 52px; padding: 0 8px; }
-.gbay-weapon-editor-shell .gbay-tabs button { padding: 0 14px; color: #e3f0e8; font-size: 12px; }
+.gbay-weapon-editor-shell .gbay-tabs button { padding: 0 14px; color: #e3f0e8; font-size: var(--gbay-body); }
 .gbay-weapon-editor-shell .gbay-toolbar {
   min-height: 56px;
   grid-template-columns: 1fr;
   padding: 7px 11px;
 }
 .gbay-weapon-editor-shell .gbay-search { height: 40px; padding: 0 12px; }
-.gbay-weapon-editor-shell .gbay-search input { font-size: 14px; }
+.gbay-weapon-editor-shell .gbay-search input { font-size: var(--gbay-body); }
 .gbay-weapon-editor-shell .gbay-customize-weapons {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: none;
@@ -2384,8 +2389,8 @@ button.menu-item { cursor: pointer; }
   min-height: 70px;
 }
 .gbay-weapon-editor-shell .gbay-customize-weapon-copy { gap: 5px; }
-.gbay-weapon-editor-shell .gbay-customize-weapon-copy > small { color: #365444; font-size: 11px; }
-.gbay-weapon-editor-shell .gbay-customize-weapon-copy > strong { color: #172d21; font-size: 18px; }
+.gbay-weapon-editor-shell .gbay-customize-weapon-copy > small { color: #365444; font-size: var(--gbay-meta); }
+.gbay-weapon-editor-shell .gbay-customize-weapon-copy > strong { color: #172d21; font-size: var(--gbay-label); }
 .gbay-weapon-editor-shell .gbay-customize-weapon > .gbay-customize-weapon-tool {
   position: static;
   width: 42px;
@@ -2405,7 +2410,7 @@ button.menu-item { cursor: pointer; }
   overflow-x: auto;
   padding: 0 8px;
 }
-.gbay-weapon-editor-shell .gbay-workbench-tabs button { flex: 1 0 125px; color: #294837; font-size: 12px; }
+.gbay-weapon-editor-shell .gbay-workbench-tabs button { flex: 1 0 125px; color: #294837; font-size: var(--gbay-body); }
 .gbay-weapon-editor-shell .gbay-workbench-options {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: none;
@@ -2431,11 +2436,11 @@ button.menu-item { cursor: pointer; }
   color: #4e6658;
   border-top: 1px solid #b8c8bf;
   background: #dfe8e2;
-  font-size: 10px;
+  font-size: var(--gbay-meta);
   font-weight: 700;
 }
 .gbay-workbench-scroll-footer > span { color: #176f3a; letter-spacing: .06em; }
-.gbay-workbench-scroll-footer > small { font-size: 10px; }
+.gbay-workbench-scroll-footer > small { font-size: var(--gbay-meta); }
 .gbay-weapon-editor-shell .gbay-workbench-card {
   min-height: 86px;
   grid-template-columns: 56px minmax(0, 1fr) auto;
@@ -2443,11 +2448,11 @@ button.menu-item { cursor: pointer; }
   padding: 12px 13px;
   box-shadow: 3px 3px 0 rgba(2, 18, 9, .10);
 }
-.gbay-weapon-editor-shell .gbay-workbench-card-mark { width: 54px; height: 54px; font-size: 22px; }
-.gbay-weapon-editor-shell .gbay-workbench-card > small { color: #40594c; font-size: 11px; }
-.gbay-weapon-editor-shell .gbay-workbench-card > strong { color: #172d21; font-size: 16px; }
-.gbay-weapon-editor-shell .gbay-workbench-card-state { color: #176b3a; font-size: 11px; }
-.gbay-weapon-editor-shell .gbay-workbench-card > em { padding: 8px 10px; color: #145f34; background: #d7ebdd; font-size: 11px; }
+.gbay-weapon-editor-shell .gbay-workbench-card-mark { width: 54px; height: 54px; font-size: var(--gbay-title); }
+.gbay-weapon-editor-shell .gbay-workbench-card > small { color: #40594c; font-size: var(--gbay-meta); }
+.gbay-weapon-editor-shell .gbay-workbench-card > strong { color: #172d21; font-size: var(--gbay-label); }
+.gbay-weapon-editor-shell .gbay-workbench-card-state { color: #176b3a; font-size: var(--gbay-meta); }
+.gbay-weapon-editor-shell .gbay-workbench-card > em { padding: 8px 10px; color: #145f34; background: #d7ebdd; font-size: var(--gbay-meta); }
 .gbay-workbench-card.removable > .gbay-attachment-unequip { color: #fff; background: #176f3a; border: 1px solid #11542c; border-radius: 3px; }
 .gbay-workbench-card.removable:hover > .gbay-attachment-unequip,
 .gbay-workbench-card.removable:focus-visible > .gbay-attachment-unequip { background: #21864a; }
@@ -2456,10 +2461,10 @@ button.menu-item { cursor: pointer; }
   border-left-color: #49cf75;
   box-shadow: inset 5px 0 #49cf75, 0 0 0 3px #176f3a, 3px 3px 0 rgba(2, 18, 9, .14);
 }
-.gbay-weapon-editor-shell .gbay-catalog-footer { min-height: 48px; padding: 6px 11px; font-size: 11px; }
+.gbay-weapon-editor-shell .gbay-catalog-footer { min-height: 48px; padding: 6px 11px; font-size: var(--gbay-meta); }
 .gbay-weapon-editor-shell .gbay-pager { grid-template-columns: 36px 98px 36px; }
 .gbay-weapon-editor-shell .gbay-pager button { height: 36px; }
-.gbay-weapon-editor-shell .gbay-pager span { font-size: 12px; }
+.gbay-weapon-editor-shell .gbay-pager span { font-size: var(--gbay-body); }
 
 .gbay-weapon-editor-footer {
   min-height: 46px;
@@ -2471,7 +2476,7 @@ button.menu-item { cursor: pointer; }
   color: #4e6658;
   border-top: 1px solid #b8c8bf;
   background: #dfe8e2;
-  font-size: 10px;
+  font-size: var(--gbay-meta);
   font-weight: 700;
 }
 .gbay-weapon-editor-footer > span:first-child { color: #176f3a; }
@@ -2485,7 +2490,7 @@ button.menu-item { cursor: pointer; }
   color: #fff8c8;
   border: 1px solid #b9a744;
   background: #62591e;
-  font: normal 850 9px/1 inherit;
+  font: normal 850 var(--gbay-meta)/1 var(--ui-body-font);
   letter-spacing: .07em;
 }
 
@@ -2502,12 +2507,131 @@ button.menu-item { cursor: pointer; }
   .gbay-weapon-editor-stage { padding: 24px; }
   .gbay-weapon-editor-shell { height: 100%; }
   .gbay-weapon-editor-header { min-height: 64px; padding: 8px 10px; }
-  .gbay-weapon-editor-title strong { font-size: 23px; }
-  .gbay-weapon-editor-title small { font-size: 9px; }
+  .gbay-weapon-editor-title strong { font-size: var(--gbay-title); }
+  .gbay-weapon-editor-title small { font-size: var(--gbay-meta); }
   .gbay-weapon-editor-actions button:first-child { display: none; }
   .gbay-weapon-editor-shell .gbay-workbench-header { min-height: 76px; padding: 10px 12px; }
-  .gbay-weapon-editor-shell .gbay-workbench-header h1 { font-size: 23px; }
+  .gbay-weapon-editor-shell .gbay-workbench-header h1 { font-size: var(--gbay-title); }
   .gbay-weapon-editor-shell .gbay-workbench-header p,
   .gbay-weapon-editor-shell .gbay-workbench-header > .gbay-workbench-preview-status { display: none; }
   .gbay-weapon-editor-footer > span:last-child { display: none; }
+}
+
+/* Keep text at native CSS resolution: the compositor depends on unscaled,
+   static presentation geometry. Short screens scroll instead of shrinking. */
+.gbay-shell, .gbay-weapon-editor-shell, .gbay-confirmation-card {
+  font-family: var(--ui-body-font); font-size: var(--gbay-body); line-height: 1.4;
+}
+.startup-console li { grid-template-columns: 9ch 11ch minmax(0, 1fr); }
+.startup-console-source { white-space: normal; overflow-wrap: anywhere; }
+.startup-component strong, .startup-component small { white-space: normal; overflow-wrap: anywhere; }
+.gbay-stage { padding: 24px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.gbay-shell { max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; }
+.gbay-shell > header, .gbay-shell > nav, .gbay-shell > footer,
+.gbay-weapon-editor-shell > header, .gbay-weapon-editor-shell > footer,
+.gbay-toolbar, .gbay-tabs, .gbay-workbench-header, .gbay-workbench-tabs,
+.gbay-workbench-scroll-footer, .gbay-catalog-footer { flex-shrink: 0; }
+.gbay-header { grid-template-columns: minmax(0, 1fr) auto auto; }
+.gbay-brand { flex-wrap: wrap; gap: 4px 14px; }
+.gbay-brand span { letter-spacing: .04em; }
+.gbay-section { max-width: 24vw; overflow-wrap: anywhere; }
+.gbay-shell button, .gbay-weapon-editor-shell button, .gbay-confirmation button { line-height: 1.35; }
+.gbay-shell button:focus-visible, .gbay-weapon-editor-shell button:focus-visible,
+.gbay-shell select:focus-visible, .gbay-weapon-editor-shell select:focus-visible,
+.gbay-confirmation button:focus-visible { outline: 3px solid #c07b00; outline-offset: -3px; }
+.gbay-search:focus-within, .gbay-filter:focus-within { outline: 3px solid #176b36; outline-offset: 1px; }
+.gbay-section-nav { min-height: 50px; }
+.gbay-section-nav button { padding: 10px 12px; }
+.gbay-section-nav button.gbay-nav-tool { width: 42px; min-width: 42px; height: 40px; }
+.gbay-wrench-icon { width: 22px; height: 22px; }
+.gbay-search, .gbay-filter, .gbay-favorites { height: auto; min-height: 42px; }
+.gbay-filter { max-width: 100%; }
+.gbay-filter select { min-width: 0; max-width: 100%; }
+.gbay-toolbar { grid-template-columns: minmax(180px, 1fr) auto auto; }
+.gbay-search input { min-height: 34px; }
+.gbay-catalog { grid-template-rows: repeat(2, minmax(210px, 1fr)); overflow-y: auto; }
+.gbay-card-visual { flex-basis: 50%; }
+.gbay-card-copy { flex: 1 0 auto; gap: 4px; }
+.gbay-card-copy strong { padding-right: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.gbay-price { position: static; align-self: flex-end; margin-top: auto; max-width: 100%; overflow-wrap: anywhere; }
+.gbay-card-visual small { top: auto; bottom: 8px; max-width: calc(100% - 20px); padding: 3px 6px; color: #183c28; background: #f4f8f5; }
+.gbay-home-grid small, .gbay-delivery-grid > button > small { line-height: 1.5; }
+.gbay-home-primary { min-height: 126px; }
+.gbay-home-primary.has-tool { padding-right: 70px; }
+.gbay-home-tool { width: 42px; height: 42px; }
+.gbay-card-favorite { width: 40px; height: 40px; }
+.gbay-footer { grid-template-columns: minmax(60px, auto) minmax(0, 1fr) auto; }
+.gbay-hints, .gbay-state, .gbay-result-count { overflow-wrap: anywhere; white-space: normal; }
+.gbay-hints { line-height: 1.55; letter-spacing: 0; }
+.gbay-close, .gbay-pager button { min-height: 40px; height: auto; }
+.gbay-pager { grid-template-columns: 40px minmax(94px, auto) 40px; }
+.gbay-catalog-footer { flex-wrap: wrap; gap: 8px 16px; }
+.gbay-catalog-footer > span { min-width: 0; }
+.gbay-shell :is(.gbay-catalog, .gbay-garage-grid, .gbay-garage-storage > nav),
+.gbay-weapon-editor-shell .gbay-workbench-scrollbox { scrollbar-width: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.gbay-garage-page { grid-template-columns: minmax(260px, .8fr) minmax(0, 1.7fr); }
+.gbay-garage-location-row { grid-template-columns: minmax(0, 1fr) 42px; }
+.gbay-garage-storage > nav button span, .gbay-garage-storage > nav button em,
+.gbay-garage-grid strong, .gbay-garage-grid small, .gbay-garage-grid span:nth-child(2) > em,
+.gbay-garage-services strong, .gbay-garage-services em { white-space: normal; overflow-wrap: anywhere; }
+.gbay-garage-storage > nav button { flex-shrink: 0; min-height: 72px; }
+.gbay-garage-grid > article { flex-shrink: 0; min-height: 96px; }
+.gbay-garage-actions { flex-wrap: wrap; justify-content: flex-end; max-width: 230px; }
+.gbay-garage-actions button { min-height: 40px; height: auto; font-size: var(--gbay-meta); }
+.gbay-garage-services { max-height: 170px; }
+.gbay-garage-services > *, .gbay-garage-customization > label { flex-shrink: 0; }
+.gbay-garage-customization select { min-height: 40px; height: auto; }
+.gbay-garage-interior, .gbay-garage-customization > label { min-width: 245px; }
+.gbay-garage-recovery { min-width: 300px; }
+.gbay-panel-item { min-width: 0; gap: 12px; }
+.gbay-panel-item.tone-success { color: #176b36; }
+.gbay-panel-item.tone-warning { color: #795200; }
+.gbay-panel-item.tone-error { color: #a32f24; }
+.gbay-garage-storage > nav .gbay-garage-waypoint { font-size: 24px; }
+.gbay-panel-item > span { min-width: 0; }
+.gbay-panel-item small, .gbay-panel-item strong, .gbay-panel-item > em { overflow-wrap: anywhere; white-space: normal; }
+.gbay-panel-item select { min-width: 0; max-width: 55%; min-height: 40px; }
+.gbay-panel-item input { min-height: 32px; }
+.gbay-about-support { flex-wrap: wrap; }
+.gbay-about-support strong { white-space: normal; overflow-wrap: anywhere; }
+.gbay-about-support button { height: auto; min-height: 44px; }
+.gbay-weapon-editor-shell { width: clamp(560px, 38vw, 1080px); height: min(1080px, calc(100vh - 48px)); min-height: 0; }
+.gbay-weapon-editor-header { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px 12px; }
+.gbay-weapon-editor-account { grid-column: 2 / -1; grid-row: 2; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.gbay-weapon-editor-actions { grid-column: 3; grid-row: 1; }
+.gbay-weapon-editor-title strong { white-space: normal; line-height: 1.15; overflow-wrap: anywhere; }
+.gbay-weapon-editor-shell .gbay-workbench-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 90px; }
+.gbay-weapon-editor-shell .gbay-workbench-header h1 { white-space: normal; line-height: 1.15; }
+.gbay-weapon-editor-shell .gbay-workbench-header > .gbay-workbench-preview-status { grid-column: 1 / -1; grid-row: 2; min-width: 0; display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 8px; }
+.gbay-weapon-editor-shell .gbay-workbench-preview-status > strong { max-width: none; white-space: normal; }
+.gbay-weapon-editor-shell .gbay-workbench-tabs button { min-height: 46px; flex-basis: 138px; padding: 8px; }
+.gbay-weapon-editor-shell .gbay-workbench-tabs button.active { color: #fff; background: #176b36; }
+.gbay-weapon-editor-shell .gbay-workbench-options { grid-auto-rows: minmax(100px, auto); align-content: start; }
+.gbay-weapon-editor-shell .gbay-workbench-card { min-height: 100px; grid-template-columns: 48px minmax(0, 1fr) auto; }
+.gbay-workbench-card > small, .gbay-workbench-card > strong, .gbay-workbench-card-state { grid-column: 2; }
+.gbay-weapon-editor-shell .gbay-workbench-card > strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.gbay-weapon-editor-shell .gbay-workbench-card-mark { width: 46px; height: 46px; }
+.gbay-weapon-editor-shell .gbay-workbench-card > em { max-width: 140px; overflow-wrap: anywhere; font-style: normal; }
+.gbay-weapon-editor-shell .gbay-customize-weapon-copy > strong { white-space: normal; overflow-wrap: anywhere; }
+.gbay-workbench-scroll-footer, .gbay-weapon-editor-footer { flex-wrap: wrap; gap: 4px 12px; line-height: 1.45; }
+.gbay-confirmation > .gbay-confirmation-card { width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.gbay-confirmation-copy h2, .gbay-confirmation-copy p { overflow-wrap: anywhere; }
+.gbay-confirmation-actions { display: flex; position: sticky; bottom: 0; }
+.gbay-confirmation-actions button { min-height: 46px; font-size: var(--gbay-body); }
+@media (max-width: 1100px) {
+  .gbay-shell { width: 100%; }
+  .gbay-brand span { display: none; }
+  .gbay-toolbar { display: flex; flex-wrap: wrap; }
+  .gbay-search { flex: 1 1 240px; }
+  .gbay-garage-actions { flex-direction: column; }
+}
+@media (max-width: 760px) {
+  .gbay-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .gbay-section { display: none; }
+  .gbay-catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; grid-auto-rows: minmax(240px, auto); }
+  .gbay-home-grid, .gbay-delivery-grid, .gbay-panel { grid-template-columns: minmax(0, 1fr); }
+  .gbay-garage-page { display: flex; flex-direction: column; overflow-y: auto; }
+  .gbay-garage-storage { flex: 0 0 230px; }
+  .gbay-garage-collection { flex: 0 0 430px; }
+  .gbay-weapon-editor-shell { min-height: 0; max-width: 100%; }
 }
