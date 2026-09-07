@@ -1,5 +1,5 @@
 .reactor-speedometer {
-  position: fixed; right: max(3vw, 24px); bottom: calc(max(5vh, 24px) + 30px);
+  position: fixed; right: max(3vw, 24px); bottom: calc(max(5vh, 24px) + 110px);
   display: flex; align-items: center; gap: 16px; padding: 0;
   width: max-content; box-sizing: border-box;
   color: #f5f8f6; background: transparent; border: 0;

@@ -18,7 +18,7 @@ describe('passive speedometer', () => {
     expect(hudStyles).toContain('background: transparent')
     expect(hudStyles).toContain('width: max-content')
     expect(hudStyles).not.toMatch(/space-between|min-width|box-shadow|border-left/)
-    expect(hudStyles).toContain('bottom: calc(max(5vh, 24px) + 30px)')
+    expect(hudStyles).toContain('bottom: calc(max(5vh, 24px) + 110px)')
   })
   it('renders speed, units and gear without interactive elements or marketplace content', () => {
     const html = renderToStaticMarkup(<Speedometer frame={frame} />)
