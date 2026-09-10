@@ -8,7 +8,7 @@ Check the downloaded runtime hash with `Get-FileHash -Algorithm SHA256`. Keep th
 kit in a writable directory outside the game folder and run, for example:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\install-live-test-package.ps1 -Edition Enhanced -Archive 'C:\Downloads\ReactorV-0.2.2-enhanced-live-test.zip' -GameRoot 'C:\Games\GTAV Enhanced'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\install-live-test-package.ps1 -Edition Enhanced -Archive 'C:\Downloads\ReactorV-0.2.3-enhanced-live-test.zip' -GameRoot 'C:\Games\GTAV Enhanced'
 ```
 
 Use `-Edition Legacy` and the matching Legacy archive/game path for Legacy.

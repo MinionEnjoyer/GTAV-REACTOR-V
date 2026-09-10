@@ -1,5 +1,6 @@
 #include "RenderHookContract.h"
 #include "RenderHookPolicy.h"
+#include "AppLocalDxgi.h"
 
 #include <windows.h>
 
@@ -488,6 +489,25 @@ DWORD WINAPI RenderHookWorker(void*) noexcept {
                 L"reason=native_module_missing expected=\"" +
                     paths.nativeModule.wstring() +
                     L"\" action=repair_reactorv_installation");
+            return 0;
+        }
+
+        AppendLog(paths.diagnosticsFile, L"dxgi_compatibility_start",
+            L"candidate=\"" + (paths.gameRoot / L"dxgi.dll").wstring() + L"\"");
+        const auto dxgi = reactorv::renderhook::PrepareAppLocalDxgi(executablePath);
+        AppendLog(paths.diagnosticsFile, L"dxgi_compatibility",
+            L"decision=" + dxgi.status +
+                L" native_load_allowed=" + (dxgi.allowNativeLoad ? L"1" : L"0") +
+                L" win32_error=" + std::to_wstring(dxgi.error) +
+                L" proxy=\"" + dxgi.candidate.wstring() +
+                L"\" loaded=\"" + dxgi.loadedPath.wstring() +
+                L"\" version=\"" + dxgi.productVersion +
+                L"\" first_dxgi_before=\"" + dxgi.firstDxgiBefore.wstring() +
+                L"\" first_dxgi_after=\"" + dxgi.firstDxgiAfter.wstring() + L"\"");
+        if (!dxgi.allowNativeLoad) {
+            AppendLog(paths.diagnosticsFile, L"inactive",
+                L"reason=app_local_dxgi_not_ready action=inspect_installed_dxgi_proxy "
+                L"native_not_loaded=1 proxy_not_removed=1");
             return 0;
         }
 
