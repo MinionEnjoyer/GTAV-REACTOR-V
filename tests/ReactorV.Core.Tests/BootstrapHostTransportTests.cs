@@ -1,5 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using ReactorV.BootstrapHost;
 using Xunit;
@@ -134,6 +138,108 @@ namespace RageWebUI.Core.Tests
                 var actual = BootstrapHostWire.Read(stream);
                 Assert.Equal("visible", actual!.Value<string>("type"));
                 Assert.True(actual.Value<bool>("value"));
+            }
+        }
+
+        [Fact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public async Task Bounded_wire_read_accepts_a_delayed_hello_acknowledgement()
+        {
+            var name = "ReactorV.BoundedWire." + Guid.NewGuid().ToString("N");
+            using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            var connected = server.WaitForConnectionAsync();
+            await client.ConnectAsync(2000);
+            await connected;
+            var writer = Task.Run(async () =>
+            {
+                await Task.Delay(50);
+                BootstrapHostWire.Write(server,
+                    BootstrapHostHandshake.CreateReadyAcknowledgement(7, true));
+            });
+
+            var acknowledgement = BootstrapHostWire.Read(client, 1000);
+            await writer;
+            Assert.True(BootstrapHostHandshake.TryValidateReadyAcknowledgement(
+                acknowledgement, out var generation, out var ready, out var failure), failure);
+            Assert.Equal(7, generation);
+            Assert.True(ready);
+        }
+
+        [Fact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public async Task Bounded_wire_read_times_out_and_pipe_disposal_unblocks_a_never_acknowledging_peer()
+        {
+            var name = "ReactorV.BoundedWire." + Guid.NewGuid().ToString("N");
+            using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            var connected = server.WaitForConnectionAsync();
+            await client.ConnectAsync(2000);
+            await connected;
+
+            var stopwatch = Stopwatch.StartNew();
+            Assert.Throws<TimeoutException>(() => BootstrapHostWire.Read(client, 100));
+            Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 2000);
+            client.Dispose();
+        }
+
+        [Fact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public async Task Bounded_wire_read_returns_invalid_acknowledgements_for_existing_contract_validation()
+        {
+            var name = "ReactorV.BoundedWire." + Guid.NewGuid().ToString("N");
+            using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            var connected = server.WaitForConnectionAsync();
+            await client.ConnectAsync(2000);
+            await connected;
+            var writer = Task.Run(() => BootstrapHostWire.Write(server, new JObject
+            {
+                ["type"] = "hello_ack",
+                ["protocol"] = BootstrapHostHandshake.ProtocolVersion,
+                ["generation"] = 0,
+                ["ready"] = true,
+            }));
+
+            var acknowledgement = BootstrapHostWire.Read(client, 1000);
+            await writer.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(BootstrapHostHandshake.TryValidateReadyAcknowledgement(
+                acknowledgement, out _, out _, out var failure));
+            Assert.Equal("hello_ack_generation_invalid", failure);
+        }
+
+        [Fact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public async Task Disposing_the_client_pipe_unblocks_a_bounded_wire_wait()
+        {
+            var name = "ReactorV.BoundedWire." + Guid.NewGuid().ToString("N");
+            using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            var client = new NamedPipeClientStream(".", name, PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+            try
+            {
+                var connected = server.WaitForConnectionAsync();
+                await client.ConnectAsync(2000);
+                await connected;
+                var waiting = Task.Run(() => Record.Exception(() =>
+                    BootstrapHostWire.Read(client, 5000)));
+                await Task.Delay(50);
+                client.Dispose();
+                var error = await waiting.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(error == null || error is IOException ||
+                    error is ObjectDisposedException ||
+                    error is OperationCanceledException);
+            }
+            finally
+            {
+                client.Dispose();
             }
         }
 

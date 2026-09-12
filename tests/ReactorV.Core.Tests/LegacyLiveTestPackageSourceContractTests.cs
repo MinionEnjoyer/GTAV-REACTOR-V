@@ -41,7 +41,7 @@ namespace RageWebUI.Core.Tests
                 StringComparison.Ordinal);
             Assert.Contains("'legacy-live-test'", build, StringComparison.Ordinal);
             Assert.Contains(
-                "'ReactorV-0.2.3-legacy-live-test.zip'",
+                "'ReactorV-0.2.4-legacy-live-test.zip'",
                 build,
                 StringComparison.Ordinal);
             Assert.Contains("public_release = $false", build, StringComparison.Ordinal);

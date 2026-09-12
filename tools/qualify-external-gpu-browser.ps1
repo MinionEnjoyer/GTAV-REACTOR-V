@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)] [string]$Harness,
     [Parameter(Mandatory)] [string]$Preloader,
     [Parameter(Mandatory)] [string]$UiDirectory,
-    [Parameter(Mandatory)] [string]$OutputRoot
+    [Parameter(Mandatory)] [string]$OutputRoot,
+    [ValidateRange(0, 30000)] [int]$LateAdapterDelayMilliseconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -101,7 +102,8 @@ function Invoke-ApiQualification {
             -ArgumentList @(
                 '--scenario', 'external-gpu-consumer',
                 '--api', $Api,
-                '--duration', '20'
+                '--duration', "$([Math]::Ceiling(20 + $LateAdapterDelayMilliseconds / 1000.0))",
+                '--external-gpu-surface-start-delay-ms', "$LateAdapterDelayMilliseconds"
             ) `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
@@ -138,8 +140,9 @@ function Invoke-ApiQualification {
             -Name "Local\ReactorV.Preloader.SelfTestStop.$($preloaderProcess.Id)" `
             -Owner $preloaderProcess
 
-        if (-not $frameReady.WaitOne(15000)) {
-            throw "The packaged $Api producer did not render a shared frame within 15000 ms."
+        $frameReadyBudgetMilliseconds = 15000 + $LateAdapterDelayMilliseconds
+        if (-not $frameReady.WaitOne($frameReadyBudgetMilliseconds)) {
+            throw "The packaged $Api producer did not render a shared frame within $frameReadyBudgetMilliseconds ms."
         }
 
         # Rendering may lead the managed ContentReady callback by a few
@@ -234,6 +237,22 @@ function Invoke-ApiQualification {
             'stage=external_gpu_browser_shadow_(?:unavailable|faulted|content_unavailable|start_rejected)') {
             throw "The packaged $Api trace contains a fallback or fault: $tracePath"
         }
+        if ($LateAdapterDelayMilliseconds -gt 0) {
+            $runtimeTracePath = Join-Path $profileDirectory 'reactorv-runtime.log'
+            $runtimeTrace = Read-SharedText -Path $runtimeTracePath
+            Assert-OrderedStages -Trace $runtimeTrace -Stages @(
+                'adapter_luid_discovery_started',
+                'adapter_luid_discovery_deferred',
+                'adapter_luid_discovered'
+            )
+            if ($runtimeTrace -notmatch
+                "stage=adapter_luid_discovery_started[^\r\n]*target_pid=$($consumer.Id)") {
+                throw "The delayed $Api discovery trace did not bind the consumer PID: $runtimeTracePath"
+            }
+            if ($runtimeTrace -match 'stage=(?:adapter_luid_discovery_native_unavailable|adapter_pinned_cef_startup_failed)') {
+                throw "The delayed $Api DirectX trace contains a terminal discovery fault: $runtimeTracePath"
+            }
+        }
         if ($trace -notmatch
             'stage=bootstrap_host_native_about_toggle[^\r\n]*visible=True') {
             throw "The packaged $Api external browser was never visibly activated: $tracePath"
@@ -257,6 +276,7 @@ function Invoke-ApiQualification {
                     [Globalization.CultureInfo]::InvariantCulture),
                 3)
             self_test_stop_signaled = $true
+            late_adapter_delay_ms = $LateAdapterDelayMilliseconds
             trace = $tracePath
         }
     }
@@ -291,6 +311,7 @@ function Invoke-ApiQualification {
 $result = [ordered]@{
     schema_version = 1
     enabled_by_default = $false
+    late_adapter_delay_ms = $LateAdapterDelayMilliseconds
     d3d11 = Invoke-ApiQualification -Api 'd3d11'
     d3d12 = Invoke-ApiQualification -Api 'd3d12'
 }

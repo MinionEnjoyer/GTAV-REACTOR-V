@@ -1,6 +1,8 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using Newtonsoft.Json.Linq;
 using RageWebUI.Core;
 
@@ -587,6 +589,34 @@ namespace ReactorV.BootstrapHost
             return JObject.Parse(Encoding.UTF8.GetString(payload));
         }
 
+        public static void Write(Stream stream, JObject message, int timeoutMilliseconds)
+        {
+            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            if (message == null) throw new ArgumentNullException(nameof(message));
+            if (timeoutMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds));
+            var payload = Encoding.UTF8.GetBytes(message.ToString(Newtonsoft.Json.Formatting.None));
+            if (payload.Length <= 0 || payload.Length > MaximumFrameBytes)
+                throw new InvalidDataException("The bootstrap-host frame is outside the allowed size.");
+            var deadline = Stopwatch.StartNew();
+            WriteBounded(stream, BitConverter.GetBytes(payload.Length), timeoutMilliseconds, deadline);
+            WriteBounded(stream, payload, timeoutMilliseconds, deadline);
+        }
+
+        public static JObject? Read(Stream stream, int timeoutMilliseconds)
+        {
+            if (stream == null) throw new ArgumentNullException(nameof(stream));
+            if (timeoutMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds));
+            var deadline = Stopwatch.StartNew();
+            var lengthBytes = ReadExactlyBounded(stream, sizeof(int), timeoutMilliseconds, deadline);
+            if (lengthBytes == null) return null;
+            var length = BitConverter.ToInt32(lengthBytes, 0);
+            if (length <= 0 || length > MaximumFrameBytes)
+                throw new InvalidDataException("The bootstrap-host frame declared an invalid size.");
+            var payload = ReadExactlyBounded(stream, length, timeoutMilliseconds, deadline);
+            if (payload == null) throw new EndOfStreamException("The bootstrap-host frame ended early.");
+            return JObject.Parse(Encoding.UTF8.GetString(payload));
+        }
+
         private static byte[]? ReadExactly(Stream stream, int length)
         {
             var buffer = new byte[length];
@@ -598,6 +628,52 @@ namespace ReactorV.BootstrapHost
                 offset += read;
             }
             return buffer;
+        }
+
+        private static byte[]? ReadExactlyBounded(Stream stream, int length, int timeoutMilliseconds, Stopwatch deadline)
+        {
+            var buffer = new byte[length];
+            var offset = 0;
+            while (offset < length)
+            {
+                var remaining = timeoutMilliseconds - (int)Math.Min(int.MaxValue, deadline.ElapsedMilliseconds);
+                if (remaining <= 0) return TimeoutAndClose(stream);
+                var pending = stream.BeginRead(buffer, offset, length - offset, null, null);
+                var waiter = pending.AsyncWaitHandle;
+                using (waiter)
+                {
+                    if (!waiter.WaitOne(remaining)) return TimeoutAndClose(stream);
+                    var read = stream.EndRead(pending);
+                    if (read <= 0) return offset == 0 ? null : throw new EndOfStreamException();
+                    offset += read;
+                }
+            }
+            return buffer;
+        }
+
+        public static void AbortOwnedStream(Stream stream)
+        {
+            if (stream == null) return;
+            try { stream.Dispose(); } catch { }
+        }
+
+        private static byte[] TimeoutAndClose(Stream stream)
+        {
+            AbortOwnedStream(stream);
+            throw new TimeoutException("The bootstrap-host frame was not received before its deadline.");
+        }
+
+        private static void WriteBounded(Stream stream, byte[] buffer, int timeoutMilliseconds, Stopwatch deadline)
+        {
+            var remaining = timeoutMilliseconds - (int)Math.Min(int.MaxValue, deadline.ElapsedMilliseconds);
+            if (remaining <= 0) { TimeoutAndClose(stream); return; }
+            var pending = stream.BeginWrite(buffer, 0, buffer.Length, null, null);
+            var waiter = pending.AsyncWaitHandle;
+            using (waiter)
+            {
+                if (!waiter.WaitOne(remaining)) { TimeoutAndClose(stream); return; }
+                stream.EndWrite(pending);
+            }
         }
     }
 }

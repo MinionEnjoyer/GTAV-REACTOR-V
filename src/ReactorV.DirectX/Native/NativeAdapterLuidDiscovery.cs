@@ -4,6 +4,13 @@ using RageWebUI.DirectX.Browser;
 
 namespace RageWebUI.DirectX.Native
 {
+    internal enum AdapterLuidQueryResult
+    {
+        NotPublished,
+        Found,
+        NativeUnavailable,
+    }
+
     internal static class NativeAdapterLuidDiscovery
     {
         private const string LibraryName = "RageWebUI.Native.dll";
@@ -18,8 +25,16 @@ namespace RageWebUI.DirectX.Native
             uint targetProcessId,
             out GpuAdapterLuid adapterLuid)
         {
+            return Query(targetProcessId, out adapterLuid) ==
+                AdapterLuidQueryResult.Found;
+        }
+
+        public static AdapterLuidQueryResult Query(
+            uint targetProcessId,
+            out GpuAdapterLuid adapterLuid)
+        {
             adapterLuid = default;
-            if (targetProcessId == 0) return false;
+            if (targetProcessId == 0) return AdapterLuidQueryResult.NotPublished;
             try
             {
                 if (RWUI_QueryTargetAdapterLuid(
@@ -27,22 +42,22 @@ namespace RageWebUI.DirectX.Native
                         out var highPart,
                         out var lowPart) == 0)
                 {
-                    return false;
+                    return AdapterLuidQueryResult.NotPublished;
                 }
                 adapterLuid = new GpuAdapterLuid(highPart, lowPart);
-                return true;
+                return AdapterLuidQueryResult.Found;
             }
             catch (DllNotFoundException)
             {
-                return false;
+                return AdapterLuidQueryResult.NativeUnavailable;
             }
             catch (EntryPointNotFoundException)
             {
-                return false;
+                return AdapterLuidQueryResult.NativeUnavailable;
             }
             catch (BadImageFormatException)
             {
-                return false;
+                return AdapterLuidQueryResult.NativeUnavailable;
             }
         }
     }

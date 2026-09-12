@@ -61,6 +61,14 @@ namespace RageWebUI.Harness
                     return 6;
                 }
 
+                if (options.ExternalGpuSurfaceStartDelay > TimeSpan.Zero)
+                {
+                    Console.WriteLine(
+                        "CONSUMER DELAYING SURFACE START: scenario=external-gpu-consumer " +
+                        $"delayMs={options.ExternalGpuSurfaceStartDelay.TotalMilliseconds:0}");
+                    Thread.Sleep(options.ExternalGpuSurfaceStartDelay);
+                }
+
                 testStarted = NativeCompositor.StartTest(
                     options.Api,
                     options.Width,

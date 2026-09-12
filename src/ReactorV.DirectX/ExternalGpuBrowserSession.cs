@@ -25,6 +25,7 @@ namespace RageWebUI.DirectX
         internal const int FirstAcceleratedFrameTimeoutMilliseconds = 10000;
         internal const int AdapterLuidDiscoveryTimeoutMilliseconds = 10000;
         internal const int AdapterLuidDiscoveryPollMilliseconds = 50;
+        internal const int DeferredAdapterLuidDiscoveryPollMilliseconds = 500;
         internal const int MaximumPendingPostJsonMessages = 256;
         internal const int AcceleratedBootstrapRepaintIntervalMilliseconds = 250;
         internal const int SurfaceAcknowledgementPollMilliseconds = 25;
@@ -47,9 +48,15 @@ namespace RageWebUI.DirectX
 
         private OffscreenBrowser? _browser;
         private readonly Queue<string> _pendingPostJson = new Queue<string>();
+        private readonly ExclusiveCreationLease _browserCreationLease =
+            new ExclusiveCreationLease();
         private Timer? _adapterLuidDiscoveryTimer;
         private long _adapterLuidDiscoveryDeadlineTimestamp;
+        private long _adapterLuidDiscoveryStartedTimestamp;
         private int _adapterLuidDiscoveryCompletion;
+        private int _adapterLuidDiscoveryEpoch;
+        private int _adapterLuidBrowserStartEpoch;
+        private int _adapterLuidDiscoveryDeferred;
         private Timer? _firstFrameTimer;
         private Timer? _surfaceAcknowledgementTimer;
         private Timer? _bootstrapRepaintTimer;
@@ -495,15 +502,20 @@ namespace RageWebUI.DirectX
         private void StartAdapterLuidDiscovery()
         {
             CancelAdapterLuidDiscovery();
+            var epoch = Interlocked.Increment(ref _adapterLuidDiscoveryEpoch);
             Volatile.Write(ref _adapterLuidDiscoveryCompletion, 0);
+            Volatile.Write(ref _adapterLuidBrowserStartEpoch, 0);
+            Volatile.Write(ref _adapterLuidDiscoveryDeferred, 0);
+            var startedAt = Stopwatch.GetTimestamp();
+            Volatile.Write(ref _adapterLuidDiscoveryStartedTimestamp, startedAt);
             Volatile.Write(
                 ref _adapterLuidDiscoveryDeadlineTimestamp,
-                Stopwatch.GetTimestamp() + Math.Max(
+                startedAt + Math.Max(
                     1L,
                     Stopwatch.Frequency *
                     AdapterLuidDiscoveryTimeoutMilliseconds / 1000L));
             var timer = new Timer(
-                _ => PollAdapterLuidDiscovery(),
+                _ => PollAdapterLuidDiscovery(epoch),
                 null,
                 Timeout.Infinite,
                 Timeout.Infinite);
@@ -511,8 +523,10 @@ namespace RageWebUI.DirectX
             TraceAcceleratedBootstrap(
                 "adapter_luid_discovery_started",
                 $"target_pid={_targetGtaProcessId} " +
+                $"epoch={epoch} " +
                 $"poll_ms={AdapterLuidDiscoveryPollMilliseconds} " +
-                $"deadline_ms={AdapterLuidDiscoveryTimeoutMilliseconds}");
+                $"fast_deadline_ms={AdapterLuidDiscoveryTimeoutMilliseconds} " +
+                $"deferred_poll_ms={DeferredAdapterLuidDiscoveryPollMilliseconds}");
             try
             {
                 timer.Change(0, AdapterLuidDiscoveryPollMilliseconds);
@@ -523,37 +537,71 @@ namespace RageWebUI.DirectX
             }
         }
 
-        private void PollAdapterLuidDiscovery()
+        private void PollAdapterLuidDiscovery(int epoch)
         {
-            var found = NativeAdapterLuidDiscovery.TryQuery(
+            if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch)) return;
+            var query = NativeAdapterLuidDiscovery.Query(
                 _targetGtaProcessId,
                 out var adapterLuid);
+            if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch)) return;
             var decision = AdapterLuidDiscoveryWaitPolicy.Evaluate(
-                found,
+                query == AdapterLuidQueryResult.Found,
                 Stopwatch.GetTimestamp() >= Volatile.Read(
                     ref _adapterLuidDiscoveryDeadlineTimestamp),
                 Volatile.Read(ref _disposed) != 0 ||
-                    Volatile.Read(ref _started) == 0);
+                    Volatile.Read(ref _started) == 0,
+                nativeQueryUnavailable:
+                    query == AdapterLuidQueryResult.NativeUnavailable);
             if (decision == AdapterLuidDiscoveryDecision.Continue) return;
-            if (Interlocked.CompareExchange(
-                    ref _adapterLuidDiscoveryCompletion, 1, 0) != 0) return;
-            CancelAdapterLuidDiscoveryTimer();
-
-            if (decision == AdapterLuidDiscoveryDecision.Stop) return;
-            if (decision == AdapterLuidDiscoveryDecision.DisableExternalGpuPath)
+            if (decision == AdapterLuidDiscoveryDecision.Defer)
             {
-                TraceAcceleratedBootstrap(
-                    "adapter_luid_discovery_deadline",
-                    $"target_pid={_targetGtaProcessId} outcome=not-published");
-                QueueExternalGpuDisable(
-                    "adapter-luid-discovery-timeout",
-                    cancelIfTransportRecovered: false);
+                if (TryEnterDeferredAdapterLuidDiscovery(epoch))
+                {
+                    TraceAcceleratedBootstrap(
+                        "adapter_luid_discovery_deferred",
+                        $"target_pid={_targetGtaProcessId} epoch={epoch} " +
+                        $"elapsed_ms={ElapsedAdapterLuidDiscoveryMilliseconds()} " +
+                        $"poll_ms={DeferredAdapterLuidDiscoveryPollMilliseconds}");
+                    var timer = Volatile.Read(ref _adapterLuidDiscoveryTimer);
+                    if (IsCurrentAdapterLuidDiscoveryEpoch(epoch))
+                    {
+                        try
+                        {
+                            timer?.Change(
+                                DeferredAdapterLuidDiscoveryPollMilliseconds,
+                                DeferredAdapterLuidDiscoveryPollMilliseconds);
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            // Stop/Dispose won while changing the cadence.
+                        }
+                    }
+                }
                 return;
             }
 
+            if (decision == AdapterLuidDiscoveryDecision.DisableExternalGpuPath)
+            {
+                if (!TryCompleteAdapterLuidDiscovery(epoch)) return;
+                TraceAcceleratedBootstrap(
+                    "adapter_luid_discovery_native_unavailable",
+                    $"target_pid={_targetGtaProcessId} epoch={epoch} " +
+                    "outcome=native-query-unavailable");
+                QueueExternalGpuDisable(
+                    "adapter-luid-discovery-native-unavailable",
+                    cancelIfTransportRecovered: false,
+                    expectedAdapterLuidDiscoveryEpoch: epoch);
+                return;
+            }
+
+            if (decision == AdapterLuidDiscoveryDecision.Stop) return;
+            if (!TryReserveAdapterLuidBrowserStart(epoch)) return;
+
             TraceAcceleratedBootstrap(
                 "adapter_luid_discovered",
-                $"target_pid={_targetGtaProcessId} adapter_luid={adapterLuid}");
+                $"target_pid={_targetGtaProcessId} epoch={epoch} " +
+                $"elapsed_ms={ElapsedAdapterLuidDiscoveryMilliseconds()} " +
+                $"adapter_luid={adapterLuid}");
             try
             {
                 // This callback runs on a Timer/ThreadPool worker. CEF's
@@ -562,7 +610,10 @@ namespace RageWebUI.DirectX
                 lock (_sync)
                 {
                     if (Volatile.Read(ref _disposed) != 0 ||
-                        Volatile.Read(ref _started) == 0)
+                        Volatile.Read(ref _started) == 0 ||
+                        !IsCurrentAdapterLuidDiscoveryEpoch(epoch) ||
+                        Volatile.Read(ref _adapterLuidBrowserStartEpoch) != epoch ||
+                        _browser != null)
                     {
                         browser.Dispose();
                         return;
@@ -572,19 +623,109 @@ namespace RageWebUI.DirectX
             }
             catch (Exception error)
             {
+                if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch) ||
+                    Volatile.Read(ref _adapterLuidBrowserStartEpoch) != epoch ||
+                    Volatile.Read(ref _disposed) != 0 ||
+                    Volatile.Read(ref _started) == 0)
+                {
+                    return;
+                }
                 TraceAcceleratedBootstrap(
                     "adapter_pinned_cef_startup_failed",
                     $"type={error.GetType().Name} message={error.Message}");
                 QueueExternalGpuDisable(
                     "adapter-pinned-cef-startup-failed",
-                    cancelIfTransportRecovered: false);
+                    cancelIfTransportRecovered: false,
+                    expectedAdapterLuidDiscoveryEpoch: epoch);
+            }
+            finally
+            {
+                // Stop may have invalidated this epoch while CEF initialized.
+                // Do not let a new epoch construct another process-global CEF
+                // browser until this result has attached or been disposed.
+                _browserCreationLease.Complete(epoch);
             }
         }
 
         private void CancelAdapterLuidDiscovery()
         {
+            Interlocked.Increment(ref _adapterLuidDiscoveryEpoch);
             Interlocked.Exchange(ref _adapterLuidDiscoveryCompletion, 1);
             CancelAdapterLuidDiscoveryTimer();
+        }
+
+        private bool IsCurrentAdapterLuidDiscoveryEpoch(int epoch) =>
+            epoch != 0 && epoch == Volatile.Read(ref _adapterLuidDiscoveryEpoch);
+
+        private bool TryReserveAdapterLuidBrowserStart(int epoch)
+        {
+            lock (_sync)
+            {
+                if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch) ||
+                    Volatile.Read(ref _disposed) != 0 ||
+                    Volatile.Read(ref _started) == 0 ||
+                    _browser != null ||
+                    Volatile.Read(ref _adapterLuidDiscoveryCompletion) != 0)
+                {
+                    return false;
+                }
+
+                // Keep the discovery timer alive if a stopped epoch is still
+                // draining construction. The next poll can reserve after its
+                // finally block releases this lease.
+                if (!_browserCreationLease.TryBegin(epoch)) return false;
+
+                Volatile.Write(ref _adapterLuidDiscoveryCompletion, 1);
+                Volatile.Write(ref _adapterLuidBrowserStartEpoch, epoch);
+                CancelAdapterLuidDiscoveryTimer();
+                return true;
+            }
+        }
+
+        // Terminal discovery failure owns no CEF construction. Keep this
+        // separate from TryReserveAdapterLuidBrowserStart so a queued disable
+        // cannot strand the process-global construction lease.
+        private bool TryCompleteAdapterLuidDiscovery(int epoch)
+        {
+            lock (_sync)
+            {
+                if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch) ||
+                    Volatile.Read(ref _disposed) != 0 ||
+                    Volatile.Read(ref _started) == 0 ||
+                    Volatile.Read(ref _adapterLuidDiscoveryCompletion) != 0)
+                {
+                    return false;
+                }
+
+                Volatile.Write(ref _adapterLuidDiscoveryCompletion, 1);
+                CancelAdapterLuidDiscoveryTimer();
+                return true;
+            }
+        }
+
+        private bool TryEnterDeferredAdapterLuidDiscovery(int epoch)
+        {
+            lock (_sync)
+            {
+                if (!IsCurrentAdapterLuidDiscoveryEpoch(epoch) ||
+                    Volatile.Read(ref _disposed) != 0 ||
+                    Volatile.Read(ref _started) == 0 ||
+                    Volatile.Read(ref _adapterLuidDiscoveryDeferred) != 0)
+                {
+                    return false;
+                }
+
+                Volatile.Write(ref _adapterLuidDiscoveryDeferred, 1);
+                return true;
+            }
+        }
+
+        private long ElapsedAdapterLuidDiscoveryMilliseconds()
+        {
+            var startedAt = Volatile.Read(ref _adapterLuidDiscoveryStartedTimestamp);
+            if (startedAt <= 0) return 0;
+            return Math.Max(0L, (Stopwatch.GetTimestamp() - startedAt) * 1000L /
+                Stopwatch.Frequency);
         }
 
         private void CancelAdapterLuidDiscoveryTimer()
@@ -1012,7 +1153,8 @@ namespace RageWebUI.DirectX
 
         private void QueueExternalGpuDisable(
             string reason,
-            bool cancelIfTransportRecovered)
+            bool cancelIfTransportRecovered,
+            int expectedAdapterLuidDiscoveryEpoch = 0)
         {
             if (Interlocked.CompareExchange(ref _disableQueued, 1, 0) != 0)
                 return;
@@ -1024,15 +1166,23 @@ namespace RageWebUI.DirectX
             // mailbox would belong to the Preloader process, not GTA.
             ThreadPool.QueueUserWorkItem(_ => DisableExternalGpuPath(
                 reason,
-                cancelIfTransportRecovered));
+                cancelIfTransportRecovered,
+                expectedAdapterLuidDiscoveryEpoch));
         }
 
         private void DisableExternalGpuPath(
             string reason,
-            bool cancelIfTransportRecovered)
+            bool cancelIfTransportRecovered,
+            int expectedAdapterLuidDiscoveryEpoch = 0)
         {
             lock (_sync)
             {
+                if (expectedAdapterLuidDiscoveryEpoch != 0 &&
+                    !IsCurrentAdapterLuidDiscoveryEpoch(
+                        expectedAdapterLuidDiscoveryEpoch))
+                {
+                    return;
+                }
                 if (Volatile.Read(ref _disposed) != 0 ||
                     Volatile.Read(ref _started) == 0)
                 {

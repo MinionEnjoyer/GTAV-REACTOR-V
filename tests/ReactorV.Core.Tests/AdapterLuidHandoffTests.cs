@@ -22,9 +22,9 @@ public sealed class AdapterLuidHandoffTests
     [InlineData(false, false, false, (int)AdapterLuidDiscoveryDecision.Continue)]
     [InlineData(true, false, false, (int)AdapterLuidDiscoveryDecision.StartBrowser)]
     [InlineData(true, true, false, (int)AdapterLuidDiscoveryDecision.StartBrowser)]
-    [InlineData(false, true, false, (int)AdapterLuidDiscoveryDecision.DisableExternalGpuPath)]
+    [InlineData(false, true, false, (int)AdapterLuidDiscoveryDecision.Defer)]
     [InlineData(true, true, true, (int)AdapterLuidDiscoveryDecision.Stop)]
-    public void DiscoveryWaitIsBoundedAndStopWins(
+    public void DiscoveryFastPhaseTransitionsToDeferredPollingAndStopWins(
         bool discovered,
         bool deadlineReached,
         bool stopping,
@@ -37,6 +37,69 @@ public sealed class AdapterLuidHandoffTests
                 deadlineReached,
                 stopping));
     }
+
+    [Theory]
+    [InlineData(9_900, (int)AdapterLuidDiscoveryDecision.Continue)]
+    [InlineData(10_000, (int)AdapterLuidDiscoveryDecision.Defer)]
+    [InlineData(10_100, (int)AdapterLuidDiscoveryDecision.Defer)]
+    [InlineData(30_000, (int)AdapterLuidDiscoveryDecision.Defer)]
+    public void LateAdapterDiscoveryRemainsEligibleUntilSessionCancellation(
+        int elapsedMilliseconds,
+        int expected)
+    {
+        Assert.Equal(
+            (AdapterLuidDiscoveryDecision)expected,
+            AdapterLuidDiscoveryWaitPolicy.Evaluate(
+                adapterDiscovered: false,
+                fastDeadlineReached:
+                    elapsedMilliseconds >= 10_000,
+                sessionStopping: false));
+
+        Assert.Equal(
+            AdapterLuidDiscoveryDecision.StartBrowser,
+            AdapterLuidDiscoveryWaitPolicy.Evaluate(
+                adapterDiscovered: true,
+                fastDeadlineReached: true,
+                sessionStopping: false));
+    }
+
+    [Fact]
+        public void NativeQueryInstallationFailureIsTerminalButAnUnpublishedAdapterIsNot()
+    {
+        Assert.Equal(
+            AdapterLuidDiscoveryDecision.DisableExternalGpuPath,
+            AdapterLuidDiscoveryWaitPolicy.Evaluate(
+                adapterDiscovered: false,
+                fastDeadlineReached: false,
+                sessionStopping: false,
+                nativeQueryUnavailable: true));
+        Assert.Equal(
+            AdapterLuidDiscoveryDecision.Defer,
+            AdapterLuidDiscoveryWaitPolicy.Evaluate(
+                adapterDiscovered: false,
+                fastDeadlineReached: true,
+                sessionStopping: false));
+        }
+
+        [Fact]
+        public void Terminal_native_query_failure_completes_discovery_without_reserving_cef_creation()
+        {
+            var root = FindRepositoryRoot();
+            var session = File.ReadAllText(Path.Combine(
+                root, "src", "ReactorV.DirectX", "ExternalGpuBrowserSession.cs"));
+            var start = session.IndexOf(
+                "if (decision == AdapterLuidDiscoveryDecision.DisableExternalGpuPath)",
+                StringComparison.Ordinal);
+            var end = session.IndexOf(
+                "if (decision == AdapterLuidDiscoveryDecision.Stop) return;",
+                start,
+                StringComparison.Ordinal);
+            Assert.True(start >= 0 && end > start);
+            var terminal = session.Substring(start, end - start);
+
+            Assert.Contains("TryCompleteAdapterLuidDiscovery(epoch)", terminal);
+            Assert.DoesNotContain("TryReserveAdapterLuidBrowserStart(epoch)", terminal);
+        }
 
     [Fact]
     public void NativeMappingIsProcessIdentityValidatedAndConsumerOwned()
@@ -79,10 +142,12 @@ public sealed class AdapterLuidHandoffTests
         Assert.Contains("StartAdapterLuidDiscovery();", session);
         Assert.Contains("new Timer(", session);
         Assert.Contains("AdapterLuidDiscoveryTimeoutMilliseconds", session);
-        Assert.Contains("NativeAdapterLuidDiscovery.TryQuery(", session);
+        Assert.Contains("NativeAdapterLuidDiscovery.Query(", session);
         Assert.Contains("var browser = CreateBrowser(adapterLuid);", session);
         Assert.Contains("This callback runs on a Timer/ThreadPool worker", session);
-        Assert.Contains("adapter-luid-discovery-timeout", session);
+        Assert.Contains("adapter_luid_discovery_deferred", session);
+        Assert.Contains("DeferredAdapterLuidDiscoveryPollMilliseconds", session);
+        Assert.Contains("TryReserveAdapterLuidBrowserStart", session);
         Assert.Contains("_pendingPostJson.Enqueue(json);", session);
         Assert.Contains("browser.PostJson(_pendingPostJson.Dequeue())", session);
         Assert.DoesNotContain("AttachBrowser(CreateBrowser())", session);

@@ -13,6 +13,8 @@ tests/**/bin/
 tests/**/obj/
 examples/**/bin/
 examples/**/obj/
+tools/**/bin/
+tools/**/obj/
 web/dist/
 web/dist-allin1/
 web/node_modules/

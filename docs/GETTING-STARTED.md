@@ -3,7 +3,7 @@
 Detailed setup, configuration and source-build instructions. For the project overview
 and current downloads, see the [README](../README.md).
 
-## Edition builds — 0.2.3
+## Edition builds — 0.2.4
 
 Fullscreen overlays have been confirmed in local playtesting on both editions.
 This is a regular, **edition-specific release**, not a claim of compatibility with all
@@ -12,8 +12,8 @@ enabled. Install **one** matching runtime ZIP, never both.
 
 | Download | Tested game version | In-frame renderer |
 | --- | --- | --- |
-| `ReactorV-0.2.3-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
-| `ReactorV-0.2.3-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
+| `ReactorV-0.2.4-legacy-live-test.zip` | Legacy `1.0.3889.0` | D3D11, authenticated CPU-frame bridge |
+| `ReactorV-0.2.4-enhanced-live-test.zip` | Enhanced `1.0.1158.13` | D3D12 / D3D11On12, shared GPU frames |
 
 The historical `live-test` filenames and markers identify the guarded edition
 profiles. These downloads are full runtime packages, **not incremental patches**.
@@ -21,12 +21,11 @@ Legacy includes `ReactorV.LegacyCpuFrames.enabled`; removing it changes the
 renderer route and is not a supported troubleshooting step.
 The Legacy producer is capped at 15 UI frames/second; this does not cap GTA FPS.
 
-0.2.3 fixes an early native-loader conflict that could bypass an installed
-app-local ReShade DXGI proxy. It preserves the native overlay route while
-allowing ReShade to initialize, and adds explicit compatibility diagnostics
-and Windows-loader regression tests. A single-hook candidate passed a local
-Enhanced session with ReShade/RenoDX active, responsive GBay and normal exit.
-See [the compatibility notes](DXGI-COMPATIBILITY.md) for scope and limits.
+0.2.4 hardens late graphics-adapter discovery, native startup-surface readiness,
+bootstrap handshakes and browser restart/shutdown races. It retains 0.2.3's
+app-local ReShade DXGI compatibility fix. See the
+[startup validation notes](STARTUP-HARDENING.md) and
+[ReShade compatibility notes](DXGI-COMPATIBILITY.md) for scope and limits.
 
 Consumer UI/settings preservation, native callback lifetime safeguards, edition
 guards and input/presentation checks remain unchanged. This is not confirmation
@@ -47,7 +46,7 @@ render route instead of attempting unverified hooks. Vulkan is not supported.
 3. Download the matching edition ZIP and its `.sha256` file from Releases. Check
    the ZIP using `Get-FileHash -Algorithm SHA256` before extracting it.
 4. For an existing modded installation, use the separate
-   `ReactorV-0.2.3-installer.zip` from Releases; its installer preserves the
+   `ReactorV-0.2.4-installer.zip` from Releases; its installer preserves the
    consumer preloader/menu/HUD as well as settings and extension assets.
    Do not overwrite a consumer's `ui/index.html` with the neutral runtime page.
    On a fresh installation, extract the edition runtime into the GTA folder
