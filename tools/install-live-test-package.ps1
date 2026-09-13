@@ -102,8 +102,18 @@ function Get-OwnedExtensionAssetManifest {
         if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
             throw "Refusing to preserve a reparse-point extension asset: $($file.FullName)"
         }
-        if (-not $file.Extension.Equals('.png', [StringComparison]::OrdinalIgnoreCase)) {
-            throw "The protected ALLIN1 artwork root may contain only PNG files: $($file.FullName)"
+        $relative = $file.FullName.Substring($Root.Length).TrimStart([char[]]'\/').Replace('\', '/')
+        # ALLIN1's generated catalogues pair their PNG artwork with these three
+        # indexes. Keep this allowlist exact: it is not a general data-file or
+        # executable-file allowance.
+        $isApprovedCatalogueIndex = @(
+            'generated-gear/index.json',
+            'generated-vehicles/index.json',
+            'generated-weapons/index.json'
+        ) -contains $relative
+        if (-not $file.Extension.Equals('.png', [StringComparison]::OrdinalIgnoreCase) -and
+            -not $isApprovedCatalogueIndex) {
+            throw "The protected ALLIN1 asset root may contain only PNG files or approved catalogue indexes: $($file.FullName)"
         }
         $totalBytes += $file.Length
         if ($totalBytes -gt 536870912) {
