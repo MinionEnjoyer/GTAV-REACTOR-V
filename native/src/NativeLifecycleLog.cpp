@@ -1,4 +1,5 @@
 #include "NativeLifecycleLog.h"
+#include "NativeDiagnosticTrace.h"
 #include "NativeBuildIdentity.h"
 #include <windows.h>
 #include <array>
@@ -7,6 +8,28 @@
 #include <mutex>
 
 namespace rwui {
+void DrainNativeDiagnostics() noexcept {
+    NativeDiagnosticEvent event;
+    // Limit one drain even if producers are active throughout file I/O.
+    for (std::size_t i = 0; i < NativeDiagnosticBuffer::Capacity &&
+            nativeDiagnosticBuffer.Pop(event); ++i) {
+        std::array<char, 192> operation{};
+        std::snprintf(operation.data(), operation.size(),
+            "diagnostic-v1 seq=%llu callback_tick_ms=%llu callback_tid=%lu detail=%llu",
+            static_cast<unsigned long long>(event.sequence),
+            static_cast<unsigned long long>(event.tick), event.thread,
+            static_cast<unsigned long long>(event.detail));
+        WriteNativeLifecycle(event.event, operation.data(), event.result, event.target);
+    }
+    const auto dropped = nativeDiagnosticBuffer.TakeDropped();
+    if (dropped) {
+        std::array<char, 80> operation{};
+        std::snprintf(operation.data(), operation.size(), "diagnostic-v1 dropped=%llu",
+            static_cast<unsigned long long>(dropped));
+        WriteNativeLifecycle("diagnostic_records_dropped", operation.data());
+    }
+}
+
 void WriteNativeLifecycle(const char* event, const char* operation,
                           int result, const void* target) noexcept {
     try {

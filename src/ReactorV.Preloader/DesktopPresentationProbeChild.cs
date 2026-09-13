@@ -27,6 +27,7 @@ namespace ReactorV.Preloader
         private const int MaximumGdiCaptureAttempts = 2;
         private const int GdiCaptureRetryMilliseconds = 32;
         private const int ChildResultReserveMilliseconds = 75;
+        private static readonly Stopwatch ProgressClock = Stopwatch.StartNew();
 
         internal static bool TryRun(string[] args, out int exitCode)
         {
@@ -37,6 +38,7 @@ namespace ReactorV.Preloader
                 return false;
             }
 
+            WriteProgress("dispatch");
             DesktopPresentationProbeWireResult result;
             try
             {
@@ -49,7 +51,9 @@ namespace ReactorV.Preloader
                 }
                 else
                 {
-                    result = Execute(DecodeRequest(args[1]));
+                    var request = DecodeRequest(args[1]);
+                    WriteProgress("request-decoded");
+                    result = Execute(request);
                 }
             }
             catch (Exception error) when (!IsFatal(error))
@@ -59,6 +63,7 @@ namespace ReactorV.Preloader
                     NormalizeError(error.Message));
             }
 
+            WriteProgress("result-write");
             WriteResult(result);
             return true;
         }
@@ -70,6 +75,9 @@ namespace ReactorV.Preloader
                 throw new InvalidDataException("The request payload is empty or oversized.");
             var json = new UTF8Encoding(false, true).GetString(bytes);
             var root = JObject.Parse(json);
+            var backend = root.Value<string>("backend") ?? "auto";
+            if (backend != "auto" && backend != "dxgi")
+                throw new InvalidDataException("Unknown capture backend.");
             var request = new DesktopPresentationProbeRequest
             {
                 X = RequiredInt(root, "x"),
@@ -78,6 +86,7 @@ namespace ReactorV.Preloader
                 Height = RequiredInt(root, "h"),
                 Tolerance = RequiredInt(root, "t"),
                 TimeoutMilliseconds = RequiredInt(root, "ms"),
+                Backend = backend,
             };
             var sampleArray = root["s"] as JArray ??
                 throw new InvalidDataException("The request has no sample array.");
@@ -107,6 +116,13 @@ namespace ReactorV.Preloader
                 request.Y,
                 request.Width,
                 request.Height);
+            if (request.Backend == "dxgi")
+                return CaptureDesktopDuplication(request, target,
+                    request.TimeoutMilliseconds, "isolated-gdi-timeout-fallback");
+            var points = new List<Point>(request.Samples.Count);
+            foreach (var sample in request.Samples)
+                points.Add(DesktopProbeGeometry.SamplePoint(target, sample.NormalizedX, sample.NormalizedY));
+            var captureBounds = DesktopProbeGeometry.CaptureBounds(target, points);
             // Copy the composited desktop first. Unlike a private browser
             // screenshot this is an OS-visible surface, and
             // it does not wait for a *subsequent* DXGI frame after the overlay
@@ -115,6 +131,10 @@ namespace ReactorV.Preloader
             // unavailable.
             try
             {
+                // Preserve the original full-target GDI eligibility check;
+                // cropping must not bypass the established DXGI fallback.
+                if (!SystemInformation.VirtualScreen.Contains(target))
+                    throw new ArgumentException("The target is not fully contained by the virtual desktop.");
                 DesktopPresentationProbeWireResult? best = null;
                 var gdiAttempts = 0;
                 while (gdiAttempts < MaximumGdiCaptureAttempts &&
@@ -123,14 +143,21 @@ namespace ReactorV.Preloader
                 {
                     gdiAttempts++;
                     DesktopPresentationProbeWireResult current;
-                    using (var image = CaptureCompositedDesktop(target))
+                    WriteProgress("gdi-capture");
+                    // The eight identity cells form a narrow strip. Copy their
+                    // bounding rectangle, not the entire GTA framebuffer.
+                    using (var image = CaptureCompositedDesktop(captureBounds))
+                    {
+                        WriteProgress("gdi-evaluate");
                         current = Evaluate(
                             request,
                             target,
+                            captureBounds,
                             image,
                             SystemInformation.VirtualScreen,
                             "gdi-composited-desktop:bounded-attempt-" +
                             gdiAttempts);
+                    }
                     if (current.Concrete)
                         return current;
                     if (best == null ||
@@ -186,16 +213,26 @@ namespace ReactorV.Preloader
             int timeoutMilliseconds,
             string reason)
         {
+            WriteProgress("dxgi-create");
             using (var capture = new DesktopDuplicationProbeCapture(target))
-            using (var image = capture.Capture(target, timeoutMilliseconds))
             {
-                return Evaluate(
-                    request,
-                    target,
-                    image,
-                    capture.DesktopBounds,
-                    "dxgi-desktop-duplication:" + capture.OutputIdentity +
-                    ":" + reason);
+                var points = new List<Point>(request.Samples.Count);
+                foreach (var sample in request.Samples)
+                    points.Add(DesktopProbeGeometry.SamplePoint(target, sample.NormalizedX, sample.NormalizedY));
+                var captureBounds = DesktopProbeGeometry.CaptureBounds(target, points);
+                WriteProgress("dxgi-capture");
+                using (var image = capture.Capture(captureBounds, timeoutMilliseconds))
+                {
+                    WriteProgress("dxgi-evaluate");
+                    return Evaluate(
+                        request,
+                        target,
+                        captureBounds,
+                        image,
+                        capture.DesktopBounds,
+                        "dxgi-desktop-duplication:" + capture.OutputIdentity +
+                        ":" + reason);
+                }
             }
         }
 
@@ -206,11 +243,13 @@ namespace ReactorV.Preloader
                 throw new ArgumentException(
                     "The target is not fully contained by the virtual desktop.",
                     nameof(target));
+            WriteProgress("gdi-get-dc");
             var screen = GetDC(IntPtr.Zero);
             if (screen == IntPtr.Zero)
                 throw new System.ComponentModel.Win32Exception(
                     Marshal.GetLastWin32Error(),
                     "Windows did not expose the desktop composition surface.");
+            WriteProgress("gdi-create-dc");
             var memory = CreateCompatibleDC(screen);
             if (memory == IntPtr.Zero)
             {
@@ -219,6 +258,7 @@ namespace ReactorV.Preloader
                     Marshal.GetLastWin32Error(),
                     "Windows could not create the capture device context.");
             }
+            WriteProgress("gdi-create-bitmap");
             var nativeBitmap = CreateCompatibleBitmap(
                 screen,
                 target.Width,
@@ -231,6 +271,7 @@ namespace ReactorV.Preloader
                     Marshal.GetLastWin32Error(),
                     "Windows could not allocate the capture bitmap.");
             }
+            WriteProgress("gdi-select-bitmap");
             var previous = SelectObject(memory, nativeBitmap);
             try
             {
@@ -240,6 +281,7 @@ namespace ReactorV.Preloader
                         "Windows could not select the capture bitmap.");
                 const uint SourceCopy = 0x00CC0020;
                 const uint CaptureLayeredWindows = 0x40000000;
+                WriteProgress("gdi-bitblt");
                 if (!BitBlt(
                         memory,
                         0,
@@ -255,10 +297,12 @@ namespace ReactorV.Preloader
                         Marshal.GetLastWin32Error(),
                         "Windows could not copy the composed desktop pixels.");
                 }
+                WriteProgress("gdi-read-bitmap");
                 return Image.FromHbitmap(nativeBitmap);
             }
             finally
             {
+                WriteProgress("gdi-cleanup");
                 if (previous != IntPtr.Zero && previous != new IntPtr(-1))
                     SelectObject(memory, previous);
                 DeleteObject(nativeBitmap);
@@ -270,27 +314,30 @@ namespace ReactorV.Preloader
         private static DesktopPresentationProbeWireResult Evaluate(
             DesktopPresentationProbeRequest request,
             Rectangle target,
+            Rectangle imageBounds,
             Bitmap image,
             Rectangle readableBounds,
             string source)
         {
             var readable = 0;
             var matching = 0;
+            // Only requested witness pixels, not a screenshot. Preserve their
+            // order so color conversion and absent/shifted markers can be
+            // distinguished without relaxing the existing acceptance quorum.
+            var observedRgb = new List<int?>();
             foreach (var sample in request.Samples)
             {
-                var localX = Math.Max(0, Math.Min(
-                    target.Width - 1,
-                    (int)Math.Round(sample.NormalizedX * target.Width - 0.5d)));
-                var localY = Math.Max(0, Math.Min(
-                    target.Height - 1,
-                    (int)Math.Round(sample.NormalizedY * target.Height - 0.5d)));
-                var desktopPoint = new Point(
-                    target.Left + localX,
-                    target.Top + localY);
-                if (!readableBounds.Contains(desktopPoint))
+                var desktopPoint = DesktopProbeGeometry.SamplePoint(
+                    target, sample.NormalizedX, sample.NormalizedY);
+                if (!readableBounds.Contains(desktopPoint) || !imageBounds.Contains(desktopPoint))
+                {
+                    observedRgb.Add(null);
                     continue;
-                var observed = image.GetPixel(localX, localY);
+                }
+                var observed = image.GetPixel(
+                    desktopPoint.X - imageBounds.Left, desktopPoint.Y - imageBounds.Top);
                 readable++;
+                observedRgb.Add(observed.ToArgb() & 0x00ffffff);
                 if (Math.Abs(observed.R - sample.Red) <= request.Tolerance &&
                     Math.Abs(observed.G - sample.Green) <= request.Tolerance &&
                     Math.Abs(observed.B - sample.Blue) <= request.Tolerance)
@@ -311,6 +358,7 @@ namespace ReactorV.Preloader
                         readable,
                         matching),
                 Source = source,
+                ObservedRgb = observedRgb.ToArray(),
                 Error = null,
             };
         }
@@ -377,6 +425,17 @@ namespace ReactorV.Preloader
                 : normalized.Substring(0, 160);
         }
 
+        private static void WriteProgress(string stage)
+        {
+            try
+            {
+                Console.Error.WriteLine(DesktopProbeProgress.Prefix + stage + " ms=" +
+                    ProgressClock.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Console.Error.Flush();
+            }
+            catch (IOException) { /* Diagnostics cannot authorize or suppress a witness. */ }
+        }
+
         private static void WriteResult(DesktopPresentationProbeWireResult result)
         {
             var json = JsonConvert.SerializeObject(result, Formatting.None);
@@ -430,6 +489,7 @@ namespace ReactorV.Preloader
 
         private sealed class DesktopPresentationProbeRequest
         {
+            internal string Backend { get; set; } = "auto";
             internal int X { get; set; }
             internal int Y { get; set; }
             internal int Width { get; set; }
@@ -466,6 +526,9 @@ namespace ReactorV.Preloader
             [JsonProperty("error")]
             internal string? Error { get; set; }
 
+            [JsonProperty("observedRgb")]
+            internal int?[]? ObservedRgb { get; set; }
+
             internal static DesktopPresentationProbeWireResult Failed(string error) =>
                 new DesktopPresentationProbeWireResult
                 {
@@ -490,42 +553,79 @@ namespace ReactorV.Preloader
         private readonly Device _device;
         private readonly OutputDuplication _duplication;
         private readonly Texture2D _staging;
+        private readonly Format _format;
+        private readonly double _sdrWhiteScale;
+        private readonly string _outputDeviceName;
+        private readonly ColorSpaceType _outputColorSpace;
         private bool _frameAcquired;
         private bool _disposed;
 
         internal DesktopDuplicationProbeCapture(Rectangle targetBounds)
         {
-            _factory = new Factory1();
-            (_adapter, _output, DesktopBounds) = SelectOutput(
-                _factory,
-                targetBounds);
-            var description = _output.Description;
-            if (description.Rotation != DisplayModeRotation.Identity &&
-                description.Rotation != DisplayModeRotation.Unspecified)
+            try
             {
-                throw new NotSupportedException(
-                    "The selected DXGI output is rotated.");
-            }
-            OutputIdentity = _adapter.Description1.Description.Trim() +
-                " | " + description.DeviceName;
-            _output1 = _output.QueryInterface<Output1>();
-            _device = new Device(_adapter, DeviceCreationFlags.BgraSupport);
-            _duplication = _output1.DuplicateOutput(_device);
-            _staging = new Texture2D(
-                _device,
-                new Texture2DDescription
+                _factory = new Factory1();
+                (_adapter, _output, DesktopBounds) = SelectOutput(
+                    _factory,
+                    targetBounds);
+                var description = _output.Description;
+                _outputDeviceName = description.DeviceName;
+                if (description.Rotation != DisplayModeRotation.Identity &&
+                    description.Rotation != DisplayModeRotation.Unspecified)
                 {
-                    Width = DesktopBounds.Width,
-                    Height = DesktopBounds.Height,
-                    MipLevels = 1,
-                    ArraySize = 1,
-                    Format = Format.B8G8R8A8_UNorm,
-                    SampleDescription = new SampleDescription(1, 0),
-                    Usage = ResourceUsage.Staging,
-                    BindFlags = BindFlags.None,
-                    CpuAccessFlags = CpuAccessFlags.Read,
-                    OptionFlags = ResourceOptionFlags.None,
-                });
+                    throw new NotSupportedException(
+                        "The selected DXGI output is rotated.");
+                }
+                _output1 = _output.QueryInterface<Output1>();
+                _outputColorSpace = ReadOutputColorSpace();
+                _device = new Device(_adapter, DeviceCreationFlags.BgraSupport);
+                using (var output5 = _output.QueryInterfaceOrNull<Output5>())
+                {
+                    // Legacy DuplicateOutput clips HDR desktop values into BGRA8.
+                    // Preserve the native FP16 desktop instead of trying to undo
+                    // clipping or accepting incorrect marker colors.
+                    _duplication = output5 != null
+                        ? output5.DuplicateOutput1(_device, 0, 2,
+                            new[] { Format.R16G16B16A16_Float, Format.B8G8R8A8_UNorm })
+                        : _output1.DuplicateOutput(_device);
+                }
+                _format = _duplication.Description.ModeDescription.Format;
+                if (_format != Format.B8G8R8A8_UNorm && _format != Format.R16G16B16A16_Float)
+                    throw new NotSupportedException("Unsupported desktop capture format: " + _format);
+                var hdr = _outputColorSpace == ColorSpaceType.RgbFullG2084NoneP2020;
+                if (hdr && _format != Format.R16G16B16A16_Float)
+                    throw new NotSupportedException("HDR desktop was not captured without clipping.");
+                if (_format == Format.R16G16B16A16_Float && !hdr &&
+                    _outputColorSpace != ColorSpaceType.RgbFullG22NoneP709)
+                    throw new NotSupportedException("Unknown FP16 desktop color space.");
+                _sdrWhiteScale = _format == Format.R16G16B16A16_Float && hdr
+                    ? DesktopSdrWhiteLevel.ReadScale(_outputDeviceName) : 1d;
+                OutputIdentity = _adapter.Description1.Description.Trim() + " | " + description.DeviceName +
+                    ":format=" + _format + ":output_color_space=" + _outputColorSpace + ":sdr_white_scale=" +
+                    _sdrWhiteScale.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                _staging = new Texture2D(
+                    _device,
+                    new Texture2DDescription
+                    {
+                        Width = DesktopBounds.Width,
+                        Height = DesktopBounds.Height,
+                        MipLevels = 1,
+                        ArraySize = 1,
+                        Format = _format,
+                        SampleDescription = new SampleDescription(1, 0),
+                        Usage = ResourceUsage.Staging,
+                        BindFlags = BindFlags.None,
+                        CpuAccessFlags = CpuAccessFlags.Read,
+                        OptionFlags = ResourceOptionFlags.None,
+                    });
+            }
+            catch { Dispose(); throw; }
+        }
+
+        private ColorSpaceType ReadOutputColorSpace()
+        {
+            using (var output6 = _output.QueryInterfaceOrNull<Output6>())
+                return output6?.Description1.ColorSpace ?? (ColorSpaceType)(-1);
         }
 
         internal Rectangle DesktopBounds { get; }
@@ -534,16 +634,34 @@ namespace ReactorV.Preloader
         internal Bitmap Capture(Rectangle targetBounds, int timeoutMilliseconds)
         {
             ThrowIfDisposed();
+            var clock = Stopwatch.StartNew();
             SharpDX.DXGI.Resource? desktopResource = null;
             try
             {
-                _duplication.AcquireNextFrame(
-                    timeoutMilliseconds,
-                    out _,
-                    out desktopResource);
-                _frameAcquired = true;
+                // AcquireNextFrame can succeed for a pointer-only update.
+                // That is not a new desktop image. Release it before waiting
+                // again, with the same finite deadline (never an infinite wait).
+                while (true)
+                {
+                    var remaining = timeoutMilliseconds - (int)clock.ElapsedMilliseconds;
+                    if (remaining <= 0)
+                        throw new TimeoutException("DXGI produced no updated desktop image.");
+                    _duplication.AcquireNextFrame(remaining, out var information, out desktopResource);
+                    _frameAcquired = true;
+                    if (information.LastPresentTime != 0)
+                        break;
+                    desktopResource.Dispose();
+                    desktopResource = null;
+                    _duplication.ReleaseFrame();
+                    _frameAcquired = false;
+                }
                 using (var frame = desktopResource.QueryInterface<Texture2D>())
                 {
+                    var frameDescription = frame.Description;
+                    if (frameDescription.Width != DesktopBounds.Width ||
+                        frameDescription.Height != DesktopBounds.Height ||
+                        frameDescription.Format != _format)
+                        throw new InvalidDataException("DXGI frame geometry/format does not match the staging surface.");
                     _device.ImmediateContext.CopyResource(frame, _staging);
                 }
                 var mapped = _device.ImmediateContext.MapSubresource(
@@ -553,6 +671,12 @@ namespace ReactorV.Preloader
                     SharpDX.Direct3D11.MapFlags.None);
                 try
                 {
+                    if (!_factory.IsCurrent || ReadOutputColorSpace() != _outputColorSpace)
+                        throw new InvalidDataException("Output color configuration changed during capture.");
+                    if (_format == Format.R16G16B16A16_Float &&
+                        _outputColorSpace == ColorSpaceType.RgbFullG2084NoneP2020 &&
+                        DesktopSdrWhiteLevel.ReadScale(_outputDeviceName) != _sdrWhiteScale)
+                        throw new InvalidDataException("SDR reference white changed during capture.");
                     return CopyTarget(mapped, targetBounds);
                 }
                 finally
@@ -581,13 +705,13 @@ namespace ReactorV.Preloader
                 catch { }
                 _frameAcquired = false;
             }
-            _staging.Dispose();
-            _duplication.Dispose();
-            _device.Dispose();
-            _output1.Dispose();
-            _output.Dispose();
-            _adapter.Dispose();
-            _factory.Dispose();
+            _staging?.Dispose();
+            _duplication?.Dispose();
+            _device?.Dispose();
+            _output1?.Dispose();
+            _output?.Dispose();
+            _adapter?.Dispose();
+            _factory?.Dispose();
         }
 
         private Bitmap CopyTarget(DataBox source, Rectangle targetBounds)
@@ -609,19 +733,31 @@ namespace ReactorV.Preloader
                     var sourceY = intersection.Top - DesktopBounds.Top;
                     var destinationX = intersection.Left - targetBounds.Left;
                     var destinationY = intersection.Top - targetBounds.Top;
-                    var rowBytes = intersection.Width * 4;
+                    var bytesPerPixel = _format == Format.R16G16B16A16_Float ? 8 : 4;
+                    var rowBytes = intersection.Width * bytesPerPixel;
                     var row = new byte[rowBytes];
+                    var sdrRow = bytesPerPixel == 8 ? new byte[intersection.Width * 4] : row;
                     for (var y = 0; y < intersection.Height; y++)
                     {
                         var sourceRow = IntPtr.Add(
                             source.DataPointer,
-                            ((sourceY + y) * source.RowPitch) + sourceX * 4);
+                            ((sourceY + y) * source.RowPitch) + sourceX * bytesPerPixel);
                         Marshal.Copy(sourceRow, row, 0, rowBytes);
+                        if (bytesPerPixel == 8)
+                        {
+                            for (var x = 0; x < intersection.Width; x++)
+                            {
+                                sdrRow[x * 4] = DesktopCaptureColor.ToSdrByte(BitConverter.ToUInt16(row, x * 8 + 4), _sdrWhiteScale);
+                                sdrRow[x * 4 + 1] = DesktopCaptureColor.ToSdrByte(BitConverter.ToUInt16(row, x * 8 + 2), _sdrWhiteScale);
+                                sdrRow[x * 4 + 2] = DesktopCaptureColor.ToSdrByte(BitConverter.ToUInt16(row, x * 8), _sdrWhiteScale);
+                                sdrRow[x * 4 + 3] = 255;
+                            }
+                        }
                         var destinationRow = IntPtr.Add(
                             destination.Scan0,
                             ((destinationY + y) * destination.Stride) +
                             destinationX * 4);
-                        Marshal.Copy(row, 0, destinationRow, rowBytes);
+                        Marshal.Copy(sdrRow, 0, destinationRow, sdrRow.Length);
                     }
                 }
                 finally

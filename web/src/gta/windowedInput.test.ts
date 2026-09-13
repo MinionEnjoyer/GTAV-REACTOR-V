@@ -50,8 +50,11 @@ class TestElement {
   readonly dataset: Record<string, string> = {}
   readonly style: Record<string, string> = {}
   parentElement: TestElement | null = null
+  readonly children: TestElement[] = []
+  readonly selectors = new Set<string>()
   clicks = 0
   readonly dispatchedEvents: string[] = []
+  onDispatch: ((event: TestMouseEvent) => void) | null = null
   focused = false
   removed = false
   scrollHeight = 0
@@ -66,6 +69,7 @@ class TestElement {
 
   append(child: TestElement) {
     child.parentElement = this
+    this.children.push(child)
   }
 
   remove() {
@@ -82,24 +86,31 @@ class TestElement {
 
   dispatchEvent(event: TestMouseEvent) {
     this.dispatchedEvents.push(event.type)
+    this.onDispatch?.(event)
     return true
   }
 
   scrollBy(_options: unknown) {}
 
-  closest<T>(_selector: string): T | null {
+  closest<T>(selector: string): T | null {
     let candidate: TestElement | null = this
     while (candidate) {
-      if (candidate.interactive || candidate.role === 'tab') return candidate as T
+      if (candidate.selectors.has(selector) ||
+        (selector.includes('button') && candidate.interactive) ||
+        (selector.includes('[role="tab"]') && candidate.role === 'tab')) return candidate as T
       candidate = candidate.parentElement
     }
     return null
   }
 }
 
+class TestButtonElement extends TestElement {}
+
 describe('windowed input forwarding', () => {
   let pointTarget: TestElement | null
   let createdElements: TestElement[]
+  let body: TestElement
+  let root: TestElement
 
   beforeEach(() => {
     bridgeHarness.reset()
@@ -108,8 +119,12 @@ describe('windowed input forwarding', () => {
     activateProviderInput('test-presentation')
     pointTarget = null
     createdElements = []
-    const body = new TestElement()
+    body = new TestElement()
+    root = new TestElement()
+    root.selectors.add('#root')
+    body.append(root)
     vi.stubGlobal('HTMLElement', TestElement)
+    vi.stubGlobal('HTMLButtonElement', TestButtonElement)
     vi.stubGlobal('HTMLSelectElement', class extends TestElement {})
     vi.stubGlobal('MouseEvent', TestMouseEvent)
     vi.stubGlobal('WheelEvent', TestWheelEvent)
@@ -120,6 +135,7 @@ describe('windowed input forwarding', () => {
     })
     vi.stubGlobal('document', {
       body,
+      getElementById: (id: string) => id === 'root' ? root : null,
       createElement: () => {
         const element = new TestElement()
         createdElements.push(element)
@@ -226,6 +242,203 @@ describe('windowed input forwarding', () => {
     expect(button.dispatchedEvents).toContain('mouseup')
     expect(button.clicks).toBe(0)
     expect(cursor?.style.display).toBe('none')
+    dispose()
+  })
+
+  it.each(['mouseout', 'mouseup'])('clears the provider press before a reentrant %s reset listener', (eventType) => {
+    const button = new TestElement(true)
+    pointTarget = button
+    const dispose = installWindowedInputForwarding()
+    button.onDispatch = (event) => {
+      if (event.type === eventType) bridgeHarness.emit('input.pointerReset', null)
+    }
+
+    bridgeHarness.emit('input.pointer', {
+      x: 0.25,
+      y: 0.5,
+      pressed: true,
+      released: false,
+      wheelDelta: 0,
+    })
+    const cursor = createdElements.find(
+      (element) => element.dataset.reactorWindowedCursor === 'true',
+    )
+    bridgeHarness.emit('input.pointerReset', null)
+
+    expect(button.dispatchedEvents.filter((type) => type === 'mouseout')).toHaveLength(1)
+    expect(button.dispatchedEvents.filter((type) => type === 'mouseup')).toHaveLength(1)
+    expect(cursor?.style.display).toBe('none')
+    dispose()
+  })
+
+  it('abandons the first provider sample when bootstrap cleanup synchronously closes its gate', () => {
+    revokeProviderInput()
+    const bootstrapSurface = new TestElement()
+    bootstrapSurface.selectors.add('.reactor-about-surface')
+    const bootstrapTabs = new TestElement()
+    bootstrapTabs.selectors.add('.reactor-about-tabs')
+    const bootstrapAction = new TestButtonElement(true)
+    bootstrapAction.selectors.add('[data-reactor-bootstrap-action]')
+    bootstrapAction.dataset.reactorBootstrapAction = 'overview'
+    bootstrapTabs.append(bootstrapAction)
+    bootstrapSurface.append(bootstrapTabs)
+    const providerButton = new TestElement(true)
+    const dispose = installWindowedInputForwarding()
+
+    pointTarget = bootstrapAction
+    bridgeHarness.emit('input.bootstrapPointer', {
+      x: 0.1,
+      y: 0.2,
+      pressed: false,
+      released: false,
+      wheelDelta: 0,
+    })
+    const cursor = createdElements.find(
+      (element) => element.dataset.reactorWindowedCursor === 'true',
+    )
+    bootstrapAction.onDispatch = (event) => {
+      if (event.type === 'mouseout') revokeProviderInput()
+    }
+    prepareProviderInput('gbay')
+    expect(activateProviderInput('gbay')).toBe(true)
+
+    pointTarget = providerButton
+    bridgeHarness.emit('input.pointer', {
+      x: 0.75,
+      y: 0.25,
+      pressed: true,
+      released: false,
+      wheelDelta: 0,
+    })
+
+    expect(bootstrapAction.dispatchedEvents).toContain('mouseout')
+    expect(providerButton.dispatchedEvents).toHaveLength(0)
+    expect(cursor?.style.display).toBe('none')
+    expect(cursor?.dataset.reactorWindowedCursorOwner).toBe('none')
+    dispose()
+  })
+
+  it('hands the body cursor from bootstrap to GBAY without stale bootstrap traffic stealing its held provider press', () => {
+    revokeProviderInput()
+    const bootstrapSurface = new TestElement()
+    bootstrapSurface.selectors.add('.reactor-about-surface')
+    const bootstrapTabs = new TestElement()
+    bootstrapTabs.selectors.add('.reactor-about-tabs')
+    const bootstrapAction = new TestButtonElement(true)
+    bootstrapAction.selectors.add('[data-reactor-bootstrap-action]')
+    bootstrapAction.dataset.reactorBootstrapAction = 'overview'
+    bootstrapTabs.append(bootstrapAction)
+    bootstrapSurface.append(bootstrapTabs)
+    const button = new TestElement(true)
+    const dispose = installWindowedInputForwarding()
+    const pointer = (x: number, y: number, pressed: boolean, released: boolean) => bridgeHarness.emit('input.pointer', {
+      x,
+      y,
+      pressed,
+      released,
+      wheelDelta: 0,
+    })
+
+    pointTarget = bootstrapAction
+    bridgeHarness.emit('input.bootstrapPointer', {
+      x: 0.1,
+      y: 0.2,
+      pressed: false,
+      released: false,
+      wheelDelta: 0,
+    })
+
+    const cursor = createdElements.find(
+      (element) => element.dataset.reactorWindowedCursor === 'true',
+    )
+    expect(cursor).toBeDefined()
+    expect(cursor?.parentElement).toBe(body)
+    expect(cursor?.parentElement).not.toBe(root)
+    expect(body.children.at(-1)).toBe(cursor)
+    expect(cursor?.style.position).toBe('fixed')
+    expect(cursor?.style.pointerEvents).toBe('none')
+    expect(cursor?.style.zIndex).toBe('2147483647')
+    expect(cursor?.dataset.reactorWindowedCursorOwner).toBe('bootstrap')
+    expect(bootstrapAction.dispatchedEvents).toContain('mousemove')
+
+    // Provider reset and rejected provider traffic own neither the splash
+    // cursor nor its bootstrap press state.
+    bridgeHarness.emit('input.pointerReset', null)
+    pointer(0.6, 0.6, true, false)
+    expect(cursor?.style.display).toBe('block')
+    expect(cursor?.dataset.reactorWindowedCursorOwner).toBe('bootstrap')
+    expect(cursor?.style.left).toBe('100px')
+    expect(cursor?.style.top).toBe('100px')
+
+    bridgeHarness.emit('host.provider', { connected: true, sessionGeneration: 7 })
+    prepareProviderInput('gbay')
+    expect(activateProviderInput('gbay')).toBe(true)
+    pointTarget = button
+    pointer(0.75, 0.25, true, false)
+    expect(button.dispatchedEvents.filter((type) => type === 'mousedown')).toHaveLength(1)
+    expect(cursor?.style.display).toBe('block')
+    expect(cursor?.dataset.reactorWindowedCursorOwner).toBe('provider')
+
+    // These are late messages from the splash document.  Once GBAY holds the
+    // provider lease they must not hide its cursor or release its press.
+    const bootstrapEventsBeforeLateTraffic = bootstrapAction.dispatchedEvents.length
+    bridgeHarness.emit('host.provider', { connected: true, sessionGeneration: 7 })
+    bridgeHarness.emit('host.surface', { mode: 'not-a-surface' })
+    bridgeHarness.emit('host.surface', { mode: 'none', generation: 11 })
+    bridgeHarness.emit('input.bootstrapPointerReset', null)
+    pointTarget = bootstrapAction
+    bridgeHarness.emit('input.bootstrapPointer', {
+      x: 0.2,
+      y: 0.8,
+      pressed: true,
+      released: true,
+      wheelDelta: 0,
+    })
+
+    expect(cursor?.style.display).toBe('block')
+    expect(cursor?.dataset.reactorWindowedCursorOwner).toBe('provider')
+    expect(cursor?.style.left).toBe('749px')
+    expect(cursor?.style.top).toBe('125px')
+    expect(button.dispatchedEvents.filter((type) => type === 'mouseup')).toHaveLength(0)
+    expect(bootstrapAction.dispatchedEvents).toHaveLength(bootstrapEventsBeforeLateTraffic)
+    expect(bootstrapAction.clicks).toBe(0)
+
+    pointTarget = button
+    pointer(0.75, 0.25, false, true)
+    expect(button.dispatchedEvents.filter((type) => type === 'mouseup')).toHaveLength(1)
+    expect(button.clicks).toBe(1)
+
+    dispose()
+    dispose()
+    expect(cursor?.removed).toBe(true)
+  })
+
+  it.each([
+    ['provider reset', () => bridgeHarness.emit('input.pointerReset', null)],
+    ['provider loss', () => bridgeHarness.emit('host.provider', { connected: false, sessionGeneration: 1 })],
+    ['new provider session', () => bridgeHarness.emit('host.provider', { connected: true, sessionGeneration: 1 })],
+    ['bootstrap supersession', () => bridgeHarness.emit('host.surface', { mode: 'initializing', generation: 8 })],
+  ])('retires a held provider cursor exactly once on %s', (_name, revoke) => {
+    const button = new TestElement(true)
+    pointTarget = button
+    const dispose = installWindowedInputForwarding()
+
+    bridgeHarness.emit('input.pointer', {
+      x: 0.25,
+      y: 0.5,
+      pressed: true,
+      released: false,
+      wheelDelta: 0,
+    })
+    const cursor = createdElements.find(
+      (element) => element.dataset.reactorWindowedCursor === 'true',
+    )
+    revoke()
+    revoke()
+
+    expect(cursor?.style.display).toBe('none')
+    expect(button.dispatchedEvents.filter((type) => type === 'mouseup')).toHaveLength(1)
+    expect(button.clicks).toBe(0)
     dispose()
   })
 

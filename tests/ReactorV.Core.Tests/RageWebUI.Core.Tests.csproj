@@ -23,6 +23,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Shared\VerifiedWindowPromotionPolicy.cs" Link="VerifiedWindowPromotionPolicy.cs" />
+    <Compile Include="..\..\src\Shared\DesktopProbeGeometry.cs" Link="DesktopProbeGeometry.cs" />
+    <Compile Include="..\..\src\Shared\DesktopCaptureColor.cs" Link="DesktopCaptureColor.cs" />
+    <Compile Include="..\..\src\ReactorV.Preloader\DesktopSdrWhiteLevel.cs" Link="DesktopSdrWhiteLevel.cs" />
+    <Compile Include="..\..\src\Shared\DesktopProbeProgress.cs" Link="DesktopProbeProgress.cs" />
+    <Compile Include="..\..\src\Shared\PassiveHudPaintProbe.cs" Link="PassiveHudPaintProbe.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\PassiveHudPresentationGate.cs" Link="PassiveHudPresentationGate.cs" />
+    <Compile Include="..\..\src\Shared\BoundedResourceCreation.cs" Link="BoundedResourceCreation.cs" />
+    <Compile Include="..\..\src\Shared\ControllerStartupDeadline.cs" Link="ControllerStartupDeadline.cs" />
     <Compile Include="..\..\src\Shared\BorderConnectedBlackNormalizer.cs" Link="BorderConnectedBlackNormalizer.cs" />
     <Compile Include="..\..\src\Shared\GbayPresentationTimingPolicy.cs" Link="GbayPresentationTimingPolicy.cs" />
     <Compile Include="..\..\src\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
@@ -39,6 +48,7 @@
     <Compile Include="..\..\src\Shared\WebView2ProcessFailurePolicy.cs" Link="WebView2ProcessFailurePolicy.cs" />
     <Compile Include="..\..\src\Shared\WindowedInputPolicy.cs" Link="WindowedInputPolicy.cs" />
     <Compile Include="..\..\src\ReactorV.Script\MenuPresentationPolicy.cs" Link="MenuPresentationPolicy.cs" />
+    <Compile Include="..\..\src\ReactorV.Script\ProviderPresentationInputCleanup.cs" Link="ProviderPresentationInputCleanup.cs" />
     <Compile Include="..\..\src\ReactorV.Script\MenuInputLease.cs" Link="MenuInputLease.cs" />
     <Compile Include="..\..\src\ReactorV.Script\MenuRevealGate.cs" Link="MenuRevealGate.cs" />
     <Compile Include="..\..\src\ReactorV.Script\ProviderPresentationCommitGate.cs" Link="ProviderPresentationCommitGate.cs" />

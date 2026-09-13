@@ -68,7 +68,7 @@ public sealed class CompositionRevealSourceContractTests
             finalizer,
             StringComparison.Ordinal);
         var promotion = overlay.IndexOf(
-            "var promoted = NativeMethods.SetWindowPos(",
+            "var promoted = VerifiedWindowPromotion.Apply(",
             showBoundaryLock,
             StringComparison.Ordinal);
         Assert.True(presentationReady >= 0 && wait > presentationReady);
@@ -244,7 +244,7 @@ public sealed class CompositionRevealSourceContractTests
             revealMethod,
             StringComparison.Ordinal);
         var promote = overlay.IndexOf(
-            "var promoted = NativeMethods.SetWindowPos(",
+            "var promoted = VerifiedWindowPromotion.Apply(",
             revealMethod,
             StringComparison.Ordinal);
         Assert.True(boundsMethod >= 0 && hideProbeLeaseBeforeBounds > boundsMethod);
@@ -489,16 +489,12 @@ public sealed class CompositionRevealSourceContractTests
             "OwnsFinalRevealOffscreenLease(generation)",
             StringComparison.Ordinal);
         var nativePromotion = commit.IndexOf(
-            "NativeMethods.SetWindowPos(",
+            "VerifiedWindowPromotion.Apply(",
             leaseGuard,
-            StringComparison.Ordinal);
-        var noActivateFlag = commit.IndexOf(
-            "NativeMethods.SwpNoActivate",
-            nativePromotion,
             StringComparison.Ordinal);
         var parentPositionNotification = commit.IndexOf(
             "_webView.NotifyParentWindowPositionChanged();",
-            noActivateFlag,
+            nativePromotion,
             StringComparison.Ordinal);
         var leaseCommit = commit.IndexOf(
             "CommitFinalRevealOffscreenLease(generation)",
@@ -511,11 +507,20 @@ public sealed class CompositionRevealSourceContractTests
 
         Assert.True(leaseGuard >= 0);
         Assert.True(nativePromotion > leaseGuard);
-        Assert.True(noActivateFlag > nativePromotion);
-        Assert.True(parentPositionNotification > noActivateFlag);
+        Assert.True(parentPositionNotification > nativePromotion);
         Assert.True(leaseCommit > parentPositionNotification);
         Assert.True(inputCommit > leaseCommit);
-        Assert.Contains("NativeMethods.HwndTopMost", commit);
+        var promotionHelper = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ReactorV.Runtime", "VerifiedWindowPromotion.cs"));
+        Assert.Contains("VerifiedWindowPromotionPolicy.Apply(", promotionHelper);
+        Assert.Contains("NativeMethods.SwpNoActivate", promotionHelper);
+        Assert.Contains("NativeMethods.HwndTopMost", promotionHelper);
+        Assert.Contains("NativeMethods.HwndNoTopMost", promotionHelper);
+        Assert.Contains("NativeMethods.SwpNoMove | NativeMethods.SwpNoSize", promotionHelper);
+        Assert.DoesNotContain("SwpShowWindow", promotionHelper);
+        Assert.DoesNotContain("ShowWindow(", promotionHelper);
+        Assert.DoesNotContain("SetForegroundWindow(", promotionHelper);
+        Assert.DoesNotContain("SetFocus(", promotionHelper);
+        Assert.DoesNotContain("RebindRootVisual", promotionHelper);
         Assert.DoesNotContain("NativeMethods.SwpShowWindow", commit);
         Assert.DoesNotContain("Show();", commit);
         Assert.DoesNotContain("Hide();", commit);

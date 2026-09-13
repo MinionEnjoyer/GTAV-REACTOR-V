@@ -115,7 +115,7 @@ public sealed class OverlayTransferStateMachineTests
     }
 
     [Fact]
-    public void ExplicitUserIntentCanUpgradePassiveCompositionWithoutDesktopProof()
+    public void ExplicitUserIntentCannotUpgradePassiveCompositionWithoutDesktopProof()
     {
         var machine = new OverlayTransferStateMachine();
         var identity = Identity(1, "gbay-1");
@@ -133,16 +133,19 @@ public sealed class OverlayTransferStateMachineTests
             identity,
             OverlayTransferPhase.WindowPromoted,
             OverlayTransferPhase.CompositionCommittedVisible));
-        Assert.True(machine.TryAdvance(
+        Assert.False(machine.TryAdvance(
             identity,
             OverlayTransferPhase.CompositionCommittedVisible,
             OverlayTransferPhase.ExplicitUserIntentAuthorized));
         Assert.False(machine.IsInteractive);
-        Assert.True(machine.TryAdvance(
+        Assert.False(machine.TryAdvance(
             identity,
             OverlayTransferPhase.ExplicitUserIntentAuthorized,
             OverlayTransferPhase.Interactive));
-        Assert.True(machine.IsInteractive);
+        Assert.False(machine.TryAdvance(identity,
+            OverlayTransferPhase.CompositionCommittedVisible, OverlayTransferPhase.Interactive));
+        Assert.False(machine.IsInteractive);
+        Assert.Equal(OverlayTransferPhase.CompositionCommittedVisible, machine.Phase);
     }
 
     [Fact]

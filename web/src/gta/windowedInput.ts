@@ -13,11 +13,7 @@ import {
   onProviderInputReset,
   revokeProviderInput,
 } from './providerInputGate'
-import { parseHostProvider } from '../surface'
-
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { hostSurfaceSupersedesPresentation, parseHostProvider, parseHostSurface } from '../surface'
 
 function dispatchMouse(target: Element, type: string, x: number, y: number, buttons: number): void {
   target.dispatchEvent(new MouseEvent(type, {
@@ -146,17 +142,29 @@ export function installWindowedInputForwarding(): () => void {
   let providerPressed: HTMLElement | null = null
   let bootstrapHovered: HTMLElement | null = null
   let bootstrapPressed: HTMLElement | null = null
+  let cursorOwner: 'bootstrap' | 'provider' | null = null
 
   const providerControl = (target: Element | null): HTMLElement | null =>
     target?.closest<HTMLElement>(
       'button, input, select, textarea, label, [role="button"], [role="tab"]',
     ) ?? null
 
-  const showCursor = (x: number, y: number) => {
+  const showCursor = (owner: 'bootstrap' | 'provider', x: number, y: number) => {
     cursor ??= createCursor()
+    cursorOwner = owner
+    cursor.dataset.reactorWindowedCursorOwner = owner
+    cursor.dataset.reactorWindowedCursorReason = 'sample'
     cursor.style.display = 'block'
     cursor.style.left = `${x}px`
     cursor.style.top = `${y}px`
+  }
+
+  const retireCursor = (owner: 'bootstrap' | 'provider', reason: string) => {
+    if (!cursor || cursorOwner !== owner) return
+    cursorOwner = null
+    cursor.dataset.reactorWindowedCursorOwner = 'none'
+    cursor.dataset.reactorWindowedCursorReason = reason
+    cursor.style.display = 'none'
   }
 
   const bootstrapTargetAt = (x: number, y: number): HTMLElement | null => {
@@ -173,19 +181,23 @@ export function installWindowedInputForwarding(): () => void {
   }
 
   const resetBootstrapPointer = () => {
-    if (bootstrapHovered) dispatchMouse(bootstrapHovered, 'mouseout', 0, 0, 0)
-    if (bootstrapPressed) dispatchMouse(bootstrapPressed, 'mouseup', 0, 0, 0)
+    const hovered = bootstrapHovered
+    const pressed = bootstrapPressed
     bootstrapHovered = null
     bootstrapPressed = null
-    if (cursor) cursor.style.display = 'none'
+    retireCursor('bootstrap', 'bootstrap-reset')
+    if (hovered) dispatchMouse(hovered, 'mouseout', 0, 0, 0)
+    if (pressed) dispatchMouse(pressed, 'mouseup', 0, 0, 0)
   }
 
   const resetProviderPointer = () => {
-    if (providerHovered) dispatchMouse(providerHovered, 'mouseout', 0, 0, 0)
-    if (providerPressed) dispatchMouse(providerPressed, 'mouseup', 0, 0, 0)
+    const hovered = providerHovered
+    const pressed = providerPressed
     providerHovered = null
     providerPressed = null
-    if (cursor) cursor.style.display = 'none'
+    retireCursor('provider', 'provider-reset')
+    if (hovered) dispatchMouse(hovered, 'mouseout', 0, 0, 0)
+    if (pressed) dispatchMouse(pressed, 'mouseup', 0, 0, 0)
   }
 
   // A presentation replacement can arrive between two native pointer samples.
@@ -200,9 +212,12 @@ export function installWindowedInputForwarding(): () => void {
     const input = parseWindowedPointerInput(raw)
     if (!input) return
     resetBootstrapPointer()
+    // Bootstrap cleanup handlers can synchronously revoke the lease. Do not
+    // present or dispatch the accepted sample after that revocation.
+    if (!isProviderInputActive()) return
     const x = Math.round(input.x * Math.max(1, window.innerWidth - 1))
     const y = Math.round(input.y * Math.max(1, window.innerHeight - 1))
-    showCursor(x, y)
+    showCursor('provider', x, y)
     const target = document.elementFromPoint(x, y)
     if (target !== providerHovered) {
       if (providerHovered) dispatchMouse(providerHovered, 'mouseout', x, y, 0)
@@ -249,6 +264,9 @@ export function installWindowedInputForwarding(): () => void {
   })
 
   const removeBootstrapPointer = bridge.on<unknown>('input.bootstrapPointer', (raw) => {
+    // Native can still emit a final bootstrap sample while its overlay is
+    // handing off. A live provider gate owns all pointer presentation then.
+    if (isProviderInputActive()) return
     const input = parseWindowedPointerInput(raw)
     if (!input || input.wheelDelta !== 0) {
       resetBootstrapPointer()
@@ -256,7 +274,7 @@ export function installWindowedInputForwarding(): () => void {
     }
     const x = Math.round(input.x * Math.max(1, window.innerWidth - 1))
     const y = Math.round(input.y * Math.max(1, window.innerHeight - 1))
-    showCursor(x, y)
+    showCursor('bootstrap', x, y)
     const target = bootstrapTargetAt(x, y)
     if (target !== bootstrapHovered) {
       if (bootstrapHovered) dispatchMouse(bootstrapHovered, 'mouseout', x, y, 0)
@@ -290,18 +308,30 @@ export function installWindowedInputForwarding(): () => void {
     if (!provider || provider.sessionGeneration < providerSessionGeneration) return
     const providerSessionChanged = provider.sessionGeneration > providerSessionGeneration
     providerSessionGeneration = provider.sessionGeneration
-    if (providerSessionChanged || !provider.connected) revokeProviderInput()
-    resetProviderPointer()
+    if (providerSessionChanged || !provider.connected) {
+      revokeProviderInput()
+      resetProviderPointer()
+    }
+    // A connected update with the same generation is a status refresh, not a
+    // new input session. In particular, it must not manufacture mouseup or
+    // hide a provider cursor between its press and release samples.
     if (provider.connected) resetBootstrapPointer()
   })
   const removeSurfaceBoundary = bridge.on<unknown>('host.surface', (raw) => {
-    const mode = typeof raw === 'string'
-      ? raw
-      : record(raw) && typeof raw.mode === 'string'
-        ? raw.mode
-        : null
-    if (mode !== null && mode !== 'none') revokeProviderInput()
-    resetProviderPointer()
+    const surface = parseHostSurface(raw)
+    // Do not let malformed host traffic dismiss a cursor that is still live.
+    if (!surface) return
+    // `none` is the intentional bootstrap-to-provider handoff boundary. It
+    // can retire a bootstrap sample, but must never clear the provider press
+    // or cursor that is about to be (or already is) presented.
+    if (surface.mode === 'none') {
+      resetBootstrapPointer()
+      return
+    }
+    if (hostSurfaceSupersedesPresentation(surface.mode)) {
+      revokeProviderInput()
+      resetProviderPointer()
+    }
     resetBootstrapPointer()
   })
 

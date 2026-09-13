@@ -12,10 +12,7 @@ public sealed class BootstrapContentReadinessSourceContractTests
         var source = ReadRepositoryFile(
             "src", "ReactorV.Runtime", "OverlayWindow.cs");
 
-        AssertPresentationOnly(Region(
-            source,
-            "private void ExpireExplicitUserIntentInputLease(",
-            "private void CompleteQualifiedReveal("));
+        Assert.DoesNotContain("ExpireExplicitUserIntentInputLease", source);
         AssertPresentationOnly(Region(
             source,
             "private void HandleDesktopPresentationFailure(",

@@ -179,6 +179,9 @@ namespace ReactorV.Preloader
         private readonly BootstrapOverlayServer? _hostServer;
         private readonly ExternalGpuBrowserSession? _externalGpuBrowserSession;
         private readonly bool _requireNativePresenter;
+        private readonly PassiveHudGenerationMap _passiveHudGenerations = new PassiveHudGenerationMap();
+        private readonly DeferredNativeSurfaceIntent _deferredNativeSurfaceIntent =
+            new DeferredNativeSurfaceIntent();
         private readonly EventWaitHandle? _hostToggle;
         private readonly EventWaitHandle? _hostAboutToggle;
         private readonly EventWaitHandle? _hostVerifyToggle;
@@ -308,6 +311,14 @@ namespace ReactorV.Preloader
                     if (!_requireNativePresenter)
                         _hostServer.PublishProviderPresentationCommitted(presentationId,
                             _hostWindow.IsProviderPresentationAuthorizedByUserIntent(presentationId));
+                };
+                _hostWindow.HostSurfacePresentationChanged += receipt =>
+                    _hostServer.PublishHostSurfacePresentation(
+                        _passiveHudGenerations.ToProviderReceipt(receipt));
+                _hostWindow.PassiveHudLeaseExpired += generation =>
+                {
+                    if (_hostSurfaceMode == HostSurfaceMode.PassiveHud && _hostSurfaceGeneration == generation)
+                        RetireBootstrapSurface(_hostWindow, hide: true);
                 };
                 _hostServer.DualBrowserPresentationReady +=
                     (presentationId, providerSessionGeneration) => InvokeHost(
@@ -451,8 +462,16 @@ namespace ReactorV.Preloader
                         message["payload"]?.Value<string>("mode") == HostSurfaceMode.PassiveHud)
                     {
                         if (_hostServer.IsConnected && (_hostSurfaceMode == HostSurfaceMode.None ||
-                            _hostSurfaceMode == HostSurfaceMode.PassiveHud))
+                            _hostSurfaceMode == HostSurfaceMode.PassiveHud) &&
+                            _passiveHudGenerations.BeginRequest(message["payload"] as JObject))
                             RequestHostSurface(window, HostSurfaceMode.PassiveHud, true);
+                        return;
+                    }
+                    if (message.Value<string>("event") == PassiveHudContract.EventId)
+                    {
+                        var frame = _passiveHudGenerations.ToHostFrame(message["payload"] as JObject);
+                        if (frame != null)
+                            PostBrowserJson(window, BridgeProtocol.SerializeEvent(PassiveHudContract.EventId, frame));
                         return;
                     }
                     PostBrowserJson(window, json);
@@ -461,6 +480,7 @@ namespace ReactorV.Preloader
                     QueueHostPointerInput(x, y, pressed, released, wheel);
                 _hostServer.ProviderConnected += () => InvokeHost(window =>
                 {
+                    _passiveHudGenerations.Clear();
                     // Keep an already visible transition surface in place
                     // until the provider presents its real menu. Hiding here
                     // creates a blank/flickering handoff during slow startup.
@@ -468,6 +488,7 @@ namespace ReactorV.Preloader
                     window.SetBootstrapPointerCapture(false);
                     var sessionGeneration =
                         Interlocked.Increment(ref _providerSessionGeneration);
+                    _deferredNativeSurfaceIntent.RebindPreProviderSession(sessionGeneration);
                     _dualBrowserReadyPresentationId = null;
                     _dualBrowserReadyProviderSessionGeneration = 0;
                     _awaitingExternalPostAcceptPaintPresentationId = null;
@@ -483,6 +504,11 @@ namespace ReactorV.Preloader
                 }, signalRevealIngress: true);
                 _hostServer.ProviderDisconnected += () => InvokeHost(window =>
                 {
+                    _passiveHudGenerations.Clear();
+                    // A native-ready callback from the old provider/session
+                    // must never revive a surface after its owner is gone.
+                    if (_deferredNativeSurfaceIntent.IsPending)
+                        CancelPendingHostSurfaceReveal("provider-disconnected");
                     if (_hostSurfaceMode == HostSurfaceMode.PassiveHud)
                         RetireBootstrapSurface(window, hide: true);
                     var disconnectedOwner = _browserPresentation.Owner;
@@ -705,14 +731,11 @@ namespace ReactorV.Preloader
                             InvokeHost(window =>
                             {
                                 ResetExternalInitializerReadiness();
+                                StopPendingNativeSurfaceForUnavailablePresenter(
+                                    window, "external-session-fault");
                                 _hostServer.DisableExternalGpuBrowserShadow(
                                     "external-session-fault");
                                 PostBrowserRoles(window, externalGpuActive: false);
-                                TryCompleteHostSurfaceReveal(
-                                    window,
-                                    _pendingHostSurfaceMode,
-                                    _pendingHostSurfaceGeneration,
-                                    "external-gpu-unavailable");
                                 SetBrowserVisible(
                                     window,
                                     _browserPresentationRequestedVisible,
@@ -731,6 +754,8 @@ namespace ReactorV.Preloader
                                     ready,
                                     width,
                                     height);
+                                if (ready)
+                                    ResumeDeferredNativeSurface(window);
                                 if (ready &&
                                     TryStartQueuedExternalProviderReplacement(
                                         window))
@@ -973,7 +998,10 @@ namespace ReactorV.Preloader
             if (_hostServer != null && _hostWindow != null)
             {
                 if (_pendingHostSurfaceGeneration > 0)
-                    RequestHostSurface(_hostWindow, _pendingHostSurfaceMode, true);
+                {
+                    if (!_deferredNativeSurfaceIntent.IsPending)
+                        RequestHostSurface(_hostWindow, _pendingHostSurfaceMode, true);
+                }
                 else
                     PostHostSurface(_hostWindow, _hostSurfaceMode);
                 PostHostProvider(
@@ -2508,6 +2536,8 @@ namespace ReactorV.Preloader
                     _hostSurfaceMode,
                     _hostServer?.IsConnected == true));
             var generation = ++_hostSurfaceGeneration;
+            _passiveHudGenerations.BindSurface(_hostSurfaceMode, generation);
+            _hostServer?.PublishHostSurfacePresentation(null);
             _webViewInitializerReadyGeneration = 0;
             ResetExternalInitializerReadiness();
             _hostServer?.PublishSurfaceMode(_hostSurfaceMode);
@@ -2584,6 +2614,9 @@ namespace ReactorV.Preloader
                     _hostSurfaceMode,
                     mode);
             var generation = PostHostSurface(window, mode);
+            // Every new publication supersedes an older deferred identity,
+            // including a transition to a non-native/WebView surface.
+            _deferredNativeSurfaceIntent.Clear();
             if (!visible)
             {
                 CancelPendingHostSurfaceReveal("surface-hidden");
@@ -2594,6 +2627,46 @@ namespace ReactorV.Preloader
 
             _pendingHostSurfaceGeneration = generation;
             _pendingHostSurfaceMode = _hostSurfaceMode;
+            var nativeSurface = IsNativeBootstrapSurface(_pendingHostSurfaceMode) &&
+                _options.ExternalGpuBrowserShadow &&
+                !_options.BootstrapHarnessWebViewPresenter;
+            var externalSession = _externalGpuBrowserSession;
+            var nativeRequestAction = DeferredNativeSurfaceIntent.EvaluateRequest(
+                nativeSurface,
+                externalSession != null,
+                externalSession?.IsActive == true,
+                externalSession?.IsPresentationReady == true);
+            if (nativeRequestAction == NativeSurfaceRequestAction.StopUnavailable)
+            {
+                Program.Trace(
+                    _logDirectory,
+                    "bootstrap_host_native_surface_unavailable",
+                    $"mode={_pendingHostSurfaceMode} generation={generation} " +
+                    "action=hide-and-retire input_enabled=False");
+                CancelPendingHostSurfaceReveal("native-presenter-unavailable");
+                window.SetBootstrapPointerCapture(false);
+                SetBrowserVisible(window, false, "native-presenter-unavailable");
+                PostHostSurface(window, HostSurfaceMode.None);
+                return;
+            }
+
+            if (nativeRequestAction == NativeSurfaceRequestAction.DeferUntilNativeReady)
+            {
+                _deferredNativeSurfaceIntent.Defer(
+                    _pendingHostSurfaceMode,
+                    generation,
+                    Volatile.Read(ref _providerSessionGeneration));
+                _pendingHostSurfaceExpiresAt = TimeSpan.Zero;
+                window.SetBootstrapPointerCapture(false);
+                SetBrowserVisible(window, false, "native-presenter-deferred");
+                Program.Trace(
+                    _logDirectory,
+                    "bootstrap_host_native_surface_deferred",
+                    $"mode={_pendingHostSurfaceMode} generation={generation} " +
+                    "deadline=unarmed reason=native-presenter-not-ready");
+                return;
+            }
+
             _pendingHostSurfaceExpiresAt =
                 _lifetime.Elapsed + HostSurfaceReadyDeadline;
             // Verification is deliberately neutral, so it can remain visible
@@ -2925,6 +2998,11 @@ namespace ReactorV.Preloader
                     _hostSurfaceMode,
                     _hostServer?.IsConnected == true));
             SetBrowserVisible(window, true, trigger);
+            // The native route has its own exact-generation fresh-frame gate
+            // above, not an external-HWND desktop witness. Keep that boundary.
+            if (mode == HostSurfaceMode.PassiveHud && _browserPresentation.ExternalGpuVisible)
+                _hostServer?.PublishHostSurfacePresentation(_passiveHudGenerations.ToProviderReceipt(
+                    new HostSurfacePresentation(mode, generation)));
             return true;
         }
 
@@ -2936,6 +3014,63 @@ namespace ReactorV.Preloader
 
         private bool IsNativeBootstrapSurface(string? mode) =>
             ExclusiveBrowserPresentationPolicy.IsNativeBootstrapSurface(mode, _requireNativePresenter);
+
+        private void ResumeDeferredNativeSurface(OverlayWindow window)
+        {
+            var generation = _pendingHostSurfaceGeneration;
+            var mode = _pendingHostSurfaceMode;
+            if (generation <= 0 || generation != _hostSurfaceGeneration ||
+                !string.Equals(mode, _hostSurfaceMode, StringComparison.Ordinal))
+            {
+                _deferredNativeSurfaceIntent.Clear();
+                return;
+            }
+            if (!_deferredNativeSurfaceIntent.TryConsumeReady(
+                    mode,
+                    generation,
+                    Volatile.Read(ref _providerSessionGeneration),
+                    _externalGpuBrowserSession?.IsPresentationReady == true))
+            {
+                return;
+            }
+
+            _pendingHostSurfaceExpiresAt = _lifetime.Elapsed + HostSurfaceReadyDeadline;
+            Program.Trace(
+                _logDirectory,
+                "bootstrap_host_native_surface_resumed",
+                $"mode={mode} generation={generation} " +
+                $"deadline_ms={HostSurfaceReadyDeadline.TotalMilliseconds:F0}");
+            // Do not manufacture an external/browser acknowledgement from the
+            // renderer's ready edge. Re-publish a fresh surface generation so
+            // WebView's exact host.surface ACK and the native fresh-frame
+            // contract execute in their normal order.
+            RequestHostSurface(window, mode, visible: true);
+        }
+
+        private void StopPendingNativeSurfaceForUnavailablePresenter(
+            OverlayWindow window,
+            string reason)
+        {
+            if (_pendingHostSurfaceGeneration <= 0 ||
+                !IsNativeBootstrapSurface(_pendingHostSurfaceMode) ||
+                !_options.ExternalGpuBrowserShadow ||
+                _options.BootstrapHarnessWebViewPresenter)
+            {
+                return;
+            }
+
+            var mode = _pendingHostSurfaceMode;
+            var generation = _pendingHostSurfaceGeneration;
+            CancelPendingHostSurfaceReveal("native-presenter-unavailable-" + reason);
+            window.SetBootstrapPointerCapture(false);
+            SetBrowserVisible(window, false, "native-presenter-unavailable");
+            PostHostSurface(window, HostSurfaceMode.None);
+            Program.Trace(
+                _logDirectory,
+                "bootstrap_host_native_surface_unavailable",
+                $"mode={mode} generation={generation} reason={reason} " +
+                "action=hide-and-retire input_enabled=False");
+        }
 
         private void ResetExternalInitializerReadiness()
         {
@@ -3001,6 +3136,7 @@ namespace ReactorV.Preloader
 
         private void CancelPendingHostSurfaceReveal(string reason)
         {
+            _deferredNativeSurfaceIntent.Clear();
             if (_pendingHostSurfaceGeneration > 0)
             {
                 Program.Trace(

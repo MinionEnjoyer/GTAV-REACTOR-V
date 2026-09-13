@@ -113,7 +113,9 @@ set_target_properties(ReactorV.Bootstrap PROPERTIES
 add_library(ReactorV.RenderHook SHARED
     renderhook/RenderHookMain.cpp
     renderhook/RenderHookPolicy.cpp
+    renderhook/AppLocalDxgi.cpp
 )
+target_link_libraries(ReactorV.RenderHook PRIVATE version)
 target_include_directories(ReactorV.RenderHook PRIVATE renderhook)
 target_compile_definitions(ReactorV.RenderHook PRIVATE
     NOMINMAX
@@ -252,6 +254,36 @@ elseif(MINGW)
     target_link_options(ReactorV.TextureProbe.Partner PRIVATE -municode -static-libgcc -static-libstdc++)
 endif()
 if(BUILD_TESTING)
+    add_library(ReactorV.DxgiFixture SHARED tests/AppLocalDxgiProxyFixture.cpp tests/AppLocalDxgiProxyFixture.rc)
+    add_library(ReactorV.DxgiUnknownFixture SHARED tests/AppLocalDxgiProxyFixture.cpp)
+    add_library(ReactorV.DxgiFailFixture SHARED tests/AppLocalDxgiProxyFixture.cpp tests/AppLocalDxgiProxyFixture.rc)
+    target_compile_definitions(ReactorV.DxgiFailFixture PRIVATE FIXTURE_FAIL_LOAD)
+    add_library(ReactorV.DxgiMissingExportsFixture SHARED tests/AppLocalDxgiProxyFixture.cpp tests/AppLocalDxgiProxyFixture.rc)
+    target_compile_definitions(ReactorV.DxgiMissingExportsFixture PRIVATE FIXTURE_MISSING_EXPORTS)
+    add_library(ReactorV.DxgiImportFixture SHARED tests/AppLocalDxgiImportFixture.cpp)
+    target_link_libraries(ReactorV.DxgiImportFixture PRIVATE d3d11 d3d12 dxgi)
+    add_executable(ReactorV.AppLocalDxgi.Tests tests/AppLocalDxgiTests.cpp renderhook/AppLocalDxgi.cpp)
+    target_include_directories(ReactorV.AppLocalDxgi.Tests PRIVATE renderhook)
+    target_compile_definitions(ReactorV.AppLocalDxgi.Tests PRIVATE NOMINMAX UNICODE _UNICODE WIN32_LEAN_AND_MEAN
+        REACTORV_RENDERHOOK_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/renderhook/RenderHookMain.cpp")
+    target_link_libraries(ReactorV.AppLocalDxgi.Tests PRIVATE version)
+    add_dependencies(ReactorV.AppLocalDxgi.Tests ReactorV.DxgiFixture ReactorV.DxgiUnknownFixture
+        ReactorV.DxgiFailFixture ReactorV.DxgiMissingExportsFixture ReactorV.DxgiImportFixture)
+    if(MINGW)
+        target_link_options(ReactorV.AppLocalDxgi.Tests PRIVATE -municode -static-libgcc -static-libstdc++)
+    elseif(MSVC)
+        target_compile_options(ReactorV.AppLocalDxgi.Tests PRIVATE /W4 /permissive-)
+    endif()
+    add_test(NAME ReactorV.AppLocalDxgi COMMAND ReactorV.AppLocalDxgi.Tests
+        $<TARGET_FILE:ReactorV.DxgiFixture> $<TARGET_FILE:ReactorV.DxgiUnknownFixture>
+        $<TARGET_FILE:ReactorV.DxgiFailFixture> $<TARGET_FILE:ReactorV.DxgiMissingExportsFixture>
+        $<TARGET_FILE:ReactorV.DxgiImportFixture>)
+    set_tests_properties(ReactorV.AppLocalDxgi PROPERTIES TIMEOUT 60)
+
+    add_executable(ReactorV.NativeDiagnosticTrace.Tests tests/NativeDiagnosticTraceTests.cpp)
+    target_include_directories(ReactorV.NativeDiagnosticTrace.Tests PRIVATE src)
+    target_compile_definitions(ReactorV.NativeDiagnosticTrace.Tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_test(NAME ReactorV.NativeDiagnosticTrace COMMAND ReactorV.NativeDiagnosticTrace.Tests)
     add_executable(ReactorV.NativeLifecycleLog.Tests
         tests/NativeLifecycleLogTests.cpp src/NativeLifecycleLog.cpp)
     target_include_directories(ReactorV.NativeLifecycleLog.Tests PRIVATE src

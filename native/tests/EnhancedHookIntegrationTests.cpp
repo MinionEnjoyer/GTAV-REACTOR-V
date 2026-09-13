@@ -322,6 +322,31 @@ bool RunNativeReloadStress(const wchar_t* nativePath) {
     return true;
 }
 
+void PrintConsumerDiagnostics(const NativeApi& api, const char* phase) {
+    using Read = std::int32_t(RWUI_CALL*)(RwuiSharedTextureConsumerDiagnostics*);
+    const auto read = Export<Read>(api.module, "RWUI_GetSharedTextureConsumerDiagnostics");
+    RwuiSharedTextureConsumerDiagnostics diagnostics{};
+    diagnostics.byteSize = sizeof(diagnostics);
+    if (!read || read(&diagnostics) != 1) {
+        std::cerr << "CONSUMER " << phase << " diagnostics_unavailable\n";
+        return;
+    }
+    std::cout << "CONSUMER " << phase << " stage=" << diagnostics.stage
+        << " image_rejects=" << diagnostics.producerImageRejects
+        << " discovery_misses=" << diagnostics.discoveryMisses
+        << " connect_failures=" << diagnostics.connectFailures
+        << " received=" << diagnostics.receivedFrames
+        << " imported=" << diagnostics.importedResources
+        << " published=" << diagnostics.publishedFrames
+        << " copy_failures=" << diagnostics.copyFailures
+        << " ack_accepted=" << diagnostics.acknowledgementsAccepted
+        << " ack_rejected=" << diagnostics.acknowledgementsRejected
+        << " ack_failures=" << diagnostics.acknowledgementFailures
+        << " receive_error=" << diagnostics.lastReceiveError
+        << " import_error=" << diagnostics.lastImportError
+        << " import_hr=0x" << std::hex << diagnostics.lastImportHresult << std::dec << std::endl;
+}
+
 LRESULT CALLBACK WindowProcedure(
     const HWND window,
     const UINT message,
@@ -610,6 +635,7 @@ bool RunStrictExternalCompositor(
         }
         Sleep(2);
     }
+    PrintConsumerDiagnostics(api, "strict-external");
     Check(rendered,
         "authenticated producer visibility drives compositor-only rendering");
     Check(producer.Acknowledged(),

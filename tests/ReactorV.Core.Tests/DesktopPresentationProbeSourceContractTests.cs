@@ -7,6 +7,38 @@ namespace RageWebUI.Core.Tests;
 public sealed class DesktopPresentationProbeSourceContractTests
 {
     [Fact]
+    public void HdrWitnessPreservesNativeColorsAndNormalizesOnlyWithOsWhiteLevel()
+    {
+        var child = ReadRepositoryFile("src", "ReactorV.Preloader", "DesktopPresentationProbeChild.cs");
+        var white = ReadRepositoryFile("src", "ReactorV.Preloader", "DesktopSdrWhiteLevel.cs");
+        Assert.Contains("DuplicateOutput1(_device, 0, 2,", child);
+        Assert.Contains("Format.R16G16B16A16_Float, Format.B8G8R8A8_UNorm", child);
+        Assert.Contains("ReadOutputColorSpace() != _outputColorSpace", child);
+        Assert.Contains("DesktopSdrWhiteLevel.ReadScale(_outputDeviceName) != _sdrWhiteScale", child);
+        Assert.Contains("DesktopCaptureColor.ToSdrByte", child);
+        Assert.Contains("HDR desktop was not captured without clipping.", child);
+        Assert.Contains("capture.Capture(captureBounds, timeoutMilliseconds)", child);
+        Assert.Contains("paths[i].Target.Adapter, paths[i].Target.Id", white);
+        Assert.Contains("white.Value / 1000d", white);
+        Assert.DoesNotContain("DisplayConfigSetDeviceInfo", white);
+        Assert.DoesNotContain("SetDisplayConfig", white);
+        Assert.Contains("catch { Dispose(); throw; }", child);
+    }
+
+    [Fact]
+    public void PixelTelemetryIsLimitedToRequestedSamplesAndValidatedBeforeLogging()
+    {
+        var child = ReadRepositoryFile("src", "ReactorV.Preloader", "DesktopPresentationProbeChild.cs");
+        var client = ReadRepositoryFile("src", "ReactorV.Runtime", "DesktopPresentationProbeClient.cs");
+        Assert.Contains("observedRgb.Add(observed.ToArgb() & 0x00ffffff)", child);
+        Assert.Contains("pixels.Count != expectedSampleCount", client);
+        Assert.Contains("rgb < 0 || rgb > 0xffffff", client);
+        Assert.Contains("invalid-pixel-diagnostics", client);
+        Assert.Contains("ChannelTolerance = 56", client);
+        Assert.DoesNotContain("image.Save(", child);
+    }
+
+    [Fact]
     public void PreloaderDispatchesProbeBeforeSettingsParsingAndSingleton()
     {
         var program = ReadRepositoryFile(
@@ -62,7 +94,9 @@ public sealed class DesktopPresentationProbeSourceContractTests
         Assert.Contains("RedirectStandardOutput = true", client);
         Assert.Contains("RedirectStandardError = true", client);
         Assert.Contains("TaskCreationOptions.LongRunning", client);
-        Assert.Contains("process.WaitForExit(timeoutMilliseconds)", client);
+        Assert.Contains("deadline - clock.ElapsedMilliseconds", client);
+        Assert.Contains("process.WaitForExit(Math.Min(25, remaining))", client);
+        Assert.Contains("firstGdiProgressMs + MinimumGdiProgressMilliseconds", client);
         Assert.Contains("CancellationToken.None", client);
         Assert.Contains("TryKill(process)", client);
         Assert.Contains("process.WaitForExit(250)", client);
@@ -71,6 +105,11 @@ public sealed class DesktopPresentationProbeSourceContractTests
         Assert.Contains("readable.Value == expectedSampleCount", client);
         Assert.Contains("(expectedSampleCount * 3 + 3) / 4", client);
         Assert.Contains("concrete.Value && independentlyConcrete", client);
+        Assert.Contains("GdiAttemptBudgetMilliseconds = 350", client);
+        Assert.Contains("timeoutMilliseconds - (int)totalClock.ElapsedMilliseconds", client);
+        Assert.Contains("!first.ChildExitCode.HasValue", client);
+        Assert.Contains("first.LastChildStage.StartsWith(\"gdi-\"", client);
+        Assert.Contains("remaining < MinimumFallbackBudgetMilliseconds", client);
 
         var overlay = ReadRepositoryFile(
             "src", "ReactorV.Runtime", "OverlayWindow.cs");
@@ -81,14 +120,14 @@ public sealed class DesktopPresentationProbeSourceContractTests
     }
 
     [Fact]
-    public void RuntimeKeepsInconclusivePromotedWindowVisibleButNonInteractive()
+    public void RuntimeStaysPassiveDuringProbeAndHidesCompletedFailureWithoutInput()
     {
         var overlay = ReadRepositoryFile(
             "src", "ReactorV.Runtime", "OverlayWindow.cs");
         var probe = Region(
             overlay,
             "private async void BeginDesktopPresentationCommit(",
-            "private bool TryCompleteExplicitUserIntentReveal(");
+            "private void CompleteQualifiedReveal(");
         var unverified = Region(
             overlay,
             "private bool KeepCompositionQualifiedPresentationVisible(",
@@ -109,6 +148,9 @@ public sealed class DesktopPresentationProbeSourceContractTests
         Assert.DoesNotContain("ForceRecreateCompositionDevice", hardFailure);
         Assert.DoesNotContain("webview_desktop_presentation_target_recreated", hardFailure);
         Assert.Contains("ApplyVisibility(false);", hardFailure);
+        Assert.Contains("_desiredVisible = false;", hardFailure);
+        Assert.Equal(3, probe.Split("HandleDesktopPresentationFailure(").Length - 1);
+        Assert.Equal(1, probe.Split("KeepCompositionQualifiedPresentationVisible(").Length - 1);
     }
 
     [Fact]
@@ -127,6 +169,18 @@ public sealed class DesktopPresentationProbeSourceContractTests
         Assert.DoesNotContain("dxgi-after-gdi-unverified", child);
         Assert.Contains("matching >= (request.Samples.Count * 3 + 3) / 4", child);
         Assert.DoesNotContain("ForceRecreateCompositionDevice", child);
+        Assert.Contains("DesktopProbeGeometry.CaptureBounds(target, points)", child);
+        Assert.Contains("CaptureCompositedDesktop(captureBounds)", child);
+        Assert.Contains("desktopPoint.X - imageBounds.Left", child);
+        Assert.Contains("WriteProgress(\"gdi-capture\")", child);
+        Assert.Contains("WriteProgress(\"dxgi-create\")", child);
+        Assert.Contains("WriteProgress(\"gdi-bitblt\")", child);
+        Assert.Contains("WriteProgress(\"gdi-read-bitmap\")", child);
+        Assert.Contains("request.Backend == \"dxgi\"", child);
+        Assert.Contains("Unknown capture backend.", child);
+        Assert.Contains("information.LastPresentTime != 0", child);
+        Assert.Contains("timeoutMilliseconds - (int)clock.ElapsedMilliseconds", child);
+        Assert.Contains("DXGI frame geometry/format does not match", child);
     }
 
     [Fact]

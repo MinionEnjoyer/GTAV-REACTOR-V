@@ -34,6 +34,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\VerifiedWindowPromotionPolicy.cs" Link="VerifiedWindowPromotionPolicy.cs" />
+    <Compile Include="..\Shared\DesktopProbeProgress.cs" Link="DesktopProbeProgress.cs" />
+    <Compile Include="..\Shared\PassiveHudPaintProbe.cs" Link="PassiveHudPaintProbe.cs" />
+    <Compile Include="..\Shared\BoundedResourceCreation.cs" Link="BoundedResourceCreation.cs" />
+    <Compile Include="..\Shared\ControllerStartupDeadline.cs" Link="ControllerStartupDeadline.cs" />
     <Compile Include="..\Shared\GameWindowSelectionPolicy.cs" Link="GameWindowSelectionPolicy.cs" />
     <Compile Include="..\Shared\Win32GameWindowLocator.cs" Link="Win32GameWindowLocator.cs" />
     <Compile Include="..\Shared\OverlayPresentationPolicy.cs" Link="OverlayPresentationPolicy.cs" />

@@ -1,4 +1,5 @@
 #include "NativeLifecycleLog.h"
+#include "NativeDiagnosticTrace.h"
 #include "NativeBuildIdentity.h"
 #include <windows.h>
 #include <filesystem>
@@ -26,6 +27,14 @@ int main() {
         line.find("pid=" + std::to_string(GetCurrentProcessId())) == std::string::npos ||
         line.find("tid=") == std::string::npos || line.find("configuration=") == std::string::npos ||
         line.find("module=") == std::string::npos) return 2;
+    rwui::RecordNativeDiagnostic("test_callback", -123, nullptr, 99);
+    // Callback recording must not perform file I/O.
+    if (Read(path) != line) return 5;
+    rwui::DrainNativeDiagnostics();
+    const auto drained = Read(path);
+    if (drained.find("event=test_callback operation=diagnostic-v1 seq=1") == std::string::npos ||
+        drained.find("callback_tid=" + std::to_string(GetCurrentThreadId())) == std::string::npos ||
+        drained.find("detail=99 result=-123") == std::string::npos) return 6;
     { std::ofstream full(path, std::ios::binary | std::ios::trunc);
       full << std::string(1024 * 1024, 'x'); }
     rwui::WriteNativeLifecycle("after_rotation", "test");

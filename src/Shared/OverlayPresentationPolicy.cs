@@ -32,6 +32,36 @@ namespace ReactorV.WebView2Host
         internal const bool UseLiveDesktopPixelSampling = false;
         internal const bool UseLiveBrowserCaptureDiagnostics = false;
 
+        // CapturePreview can round the CSS viewport up before rasterizing it.
+        // Raw controller bounds 3440x1440 at 1.5 become 3441x1440 in the PNG.
+        // This is NOT a general +/- pixel tolerance: reject undersize, unknown
+        // scale, and expansion not explained by the rasterized CSS viewport.
+        internal static bool CaptureSizeMatchesTarget(
+            int width, int height, int targetWidth, int targetHeight,
+            double captureScale, double currentScale)
+        {
+            if (targetWidth <= 0 || targetHeight <= 0 ||
+                double.IsNaN(captureScale) || double.IsInfinity(captureScale) ||
+                captureScale <= 0 || captureScale != currentScale)
+                return false;
+            return CaptureDimensionMatches(width, targetWidth, captureScale) &&
+                CaptureDimensionMatches(height, targetHeight, captureScale);
+        }
+
+        private static bool CaptureDimensionMatches(int pixels, int target, double scale)
+        {
+            if (pixels == target) return true;
+            // Limit the exception to supported desktop scales and
+            // at most three physical edge pixels. Preserve exact-size behavior
+            // outside this range; do not silently expand the trust boundary.
+            if (scale < 1 || scale > 4 ||
+                pixels < target || (long)pixels - target > 3)
+                return false;
+            const double epsilon = 0.0000001;
+            var rasterized = Math.Ceiling(target / scale - epsilon) * scale;
+            return pixels == Math.Ceiling(rasterized - epsilon);
+        }
+
         internal static bool ShouldPresent(
             bool requestedVisible,
             bool browserReady,

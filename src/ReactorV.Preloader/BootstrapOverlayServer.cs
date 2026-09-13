@@ -51,6 +51,7 @@ namespace ReactorV.Preloader
         private int _disposed;
         private string _surfaceMode = HostSurfaceMode.None;
         private string? _providerPresentationId;
+        private HostSurfacePresentation? _verifiedHostSurface;
         private bool _providerPresentationUserIntent;
         private bool _providerSessionConnected;
         private int _providerSessionGeneration;
@@ -165,6 +166,7 @@ namespace ReactorV.Preloader
             lock (_sessionSync)
             {
                 generation = _contentReadiness.MarkUnavailable();
+                _verifiedHostSurface = null;
                 _providerPresentationId = null;
                 _providerPresentationUserIntent = false;
                 _ready.Reset();
@@ -186,6 +188,7 @@ namespace ReactorV.Preloader
                 // loaded browser document and process-scoped pipe. Retire any
                 // committed provider identity, but preserve the Ready event
                 // and its generation so a late provider can still attach.
+                _verifiedHostSurface = null;
                 _providerPresentationId = null;
                 _providerPresentationUserIntent = false;
                 generation = _contentReadiness.CurrentGeneration;
@@ -204,7 +207,17 @@ namespace ReactorV.Preloader
             Interlocked.Exchange(ref _visible, visible ? 1 : 0);
             lock (_sessionSync)
             {
+                if (!visible) _verifiedHostSurface = null;
                 if (!_providerSessionConnected) return;
+                QueueStateLocked();
+            }
+        }
+
+        public void PublishHostSurfacePresentation(HostSurfacePresentation? receipt)
+        {
+            lock (_sessionSync)
+            {
+                _verifiedHostSurface = receipt;
                 QueueStateLocked();
             }
         }
@@ -462,6 +475,7 @@ namespace ReactorV.Preloader
             {
                 _providerSessionConnected = false;
                 _providerPresentationId = null;
+                _verifiedHostSurface = null;
                 _providerPresentationUserIntent = false;
                 if (_providerSessionGeneration > 0)
                 {
@@ -584,6 +598,7 @@ namespace ReactorV.Preloader
                                 continue;
                             }
                             PurgeOutgoingFrames("session_start");
+                            _verifiedHostSurface = null;
                             _providerPresentationId = null;
                             _providerPresentationUserIntent = false;
                             _providerSessionGeneration++;
@@ -619,6 +634,7 @@ namespace ReactorV.Preloader
                             lock (_sessionSync)
                             {
                                 _providerSessionConnected = false;
+                                _verifiedHostSurface = null;
                                 _providerPresentationId = null;
                                 _providerPresentationUserIntent = false;
                                 _presentationReadiness.ResetSession(
@@ -675,6 +691,7 @@ namespace ReactorV.Preloader
                 ["generation"] = _contentReadiness.CurrentGeneration,
                 ["protocol"] = BootstrapHostHandshake.ProtocolVersion,
                 ["surface"] = Volatile.Read(ref _surfaceMode),
+                ["verifiedHostSurface"] = _verifiedHostSurface?.ToJson(),
                 ["providerPresentation"] = _providerPresentationId == null
                     ? JValue.CreateNull()
                     : new JValue(_providerPresentationId),

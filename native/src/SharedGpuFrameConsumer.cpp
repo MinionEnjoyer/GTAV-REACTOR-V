@@ -1,4 +1,5 @@
 #include "SharedGpuFrameConsumer.h"
+#include "NativeDiagnosticTrace.h"
 
 #include <Windows.h>
 #include <array>
@@ -497,12 +498,23 @@ bool SharedGpuFrameConsumer::CopyAndPublish(
         }
     }
 
+    const bool diagnostic = gpuCopyDiagnosticGate.Take(GetTickCount64());
+    if (diagnostic) RecordNativeDiagnostic("diagnostic_gpu_copy_enter", 0,
+        copySource, descriptor.generation);
     context_->CopyResource(latestTexture_.Get(), copySource);
     // The producer may overwrite this keyed slot immediately after release.
     // Flush guarantees the copy that consumes it has reached the driver first.
     context_->Flush();
+    const auto deviceStatus = device_->GetDeviceRemovedReason();
+    if (diagnostic || FAILED(deviceStatus)) RecordNativeDiagnostic(
+        "diagnostic_gpu_copy_submitted", deviceStatus, copySource, descriptor.generation);
     if (!releaseSource()) {
         imported = {};
+        ClearLatestLocked();
+        return false;
+    }
+    if (FAILED(deviceStatus)) {
+        lastImportHresult_.store(static_cast<std::uint32_t>(deviceStatus), std::memory_order_relaxed);
         ClearLatestLocked();
         return false;
     }

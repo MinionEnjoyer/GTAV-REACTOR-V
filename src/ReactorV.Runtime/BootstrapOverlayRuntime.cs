@@ -21,6 +21,7 @@ namespace RageWebUI.Runtime
     internal sealed class BootstrapOverlayRuntime :
         IOverlayRuntime,
         IProviderPresentationCommitRuntime,
+        IHostSurfacePresentationRuntime,
         IProviderInputIntentRuntime,
         IContentGenerationRuntime,
         IBootstrapSurfaceRuntime,
@@ -30,6 +31,7 @@ namespace RageWebUI.Runtime
     {
         private const int MaximumQueuedFrames = 512;
         private const int ContentRecoveryWaitMilliseconds = 5000;
+        private const int HelloAcknowledgementWaitMilliseconds = 5000;
         private const int TeardownBudgetMilliseconds = 750;
 
         private readonly int _gtaProcessId;
@@ -39,9 +41,12 @@ namespace RageWebUI.Runtime
         private readonly ConcurrentQueue<JObject> _outgoing = new ConcurrentQueue<JObject>();
         private readonly AutoResetEvent _outgoingReady = new AutoResetEvent(false);
         private readonly ManualResetEvent _stop = new ManualResetEvent(false);
+        private readonly BootstrapAttachmentGate _attachmentGate =
+            new BootstrapAttachmentGate();
         private readonly object _pointerSync = new object();
         private readonly object _writeSync = new object();
         private readonly object _runtimeReadySync = new object();
+        private readonly object _workerStartSync = new object();
         private NamedPipeClientStream? _pipe;
         private Thread? _reader;
         private Thread? _writer;
@@ -59,6 +64,7 @@ namespace RageWebUI.Runtime
         private int _hostProcessId;
         private string _hostSurfaceMode = HostSurfaceMode.None;
         private string? _committedProviderPresentationId;
+        private HostSurfacePresentation? _verifiedHostSurface;
         private string? _userIntentAuthorizedProviderPresentationId;
         private int _bootstrapSurfaceRetirementPending;
         private int _bootstrapSurfaceRetirementRequiresHidden;
@@ -67,7 +73,6 @@ namespace RageWebUI.Runtime
         private RuntimeReadyHandoffState _runtimeReadyState =
             RuntimeReadyHandoffState.Unavailable;
         private long _runtimeReadyRequestStartedAt;
-        private int _started;
         private int _disposed;
         private int _workerHandlesDisposed;
 
@@ -85,6 +90,8 @@ namespace RageWebUI.Runtime
         }
 
         public bool IsVisible => Volatile.Read(ref _visible) == 1;
+        public bool IsHostSurfacePresented(string mode, int generation) =>
+            IsVisible && Volatile.Read(ref _verifiedHostSurface)?.Matches(mode, generation) == true;
 
         public string RendererName => "Bootstrap WebView2";
 
@@ -268,7 +275,16 @@ namespace RageWebUI.Runtime
 
         public bool Start()
         {
-            if (Interlocked.Exchange(ref _started, 1) != 0) return _pipe?.IsConnected == true;
+            return _attachmentGate.TryAttach(
+                StartCore,
+                () => Volatile.Read(ref _disposed) == 0 &&
+                    _pipe?.IsConnected == true);
+        }
+
+        private bool StartCore()
+        {
+            if (Volatile.Read(ref _disposed) != 0) return false;
+            NamedPipeClientStream? pipe = null;
             try
             {
                 using (var ready = EventWaitHandle.OpenExisting(
@@ -284,15 +300,15 @@ namespace RageWebUI.Runtime
                     }
                 }
 
-                var pipe = new NamedPipeClientStream(
+                pipe = new NamedPipeClientStream(
                     ".",
                     BootstrapHostNames.Pipe(_gtaProcessId),
                     PipeDirection.InOut,
                     // Match the host's overlapped handle so the proxy reader
                     // cannot block its independent writer on the same stream.
                     PipeOptions.Asynchronous);
-                pipe.Connect(500);
                 _pipe = pipe;
+                pipe.Connect(500);
                 if (!GetNamedPipeServerProcessId(
                         pipe.SafePipeHandle,
                         out var hostProcessId) ||
@@ -306,10 +322,18 @@ namespace RageWebUI.Runtime
                 // The host authenticates the first frame before publishing
                 // Connected. Write the hello synchronously so queued state or
                 // input can never win the race to become that first frame.
+                var handshakeDeadline = Stopwatch.StartNew();
                 BootstrapHostWire.Write(
                     pipe,
-                    BootstrapHostHandshake.CreateHello(_gtaProcessId));
-                var acknowledgement = BootstrapHostWire.Read(pipe);
+                    BootstrapHostHandshake.CreateHello(_gtaProcessId),
+                    HelloAcknowledgementWaitMilliseconds);
+                // The host owns the other end of this pipe.  A stalled or
+                // abandoned peer must not pin the script thread indefinitely;
+                // the catch path closes our owned handle, which unblocks the
+                // native async read before a later Start retry.
+                var acknowledgement = BootstrapHostWire.Read(
+                    pipe,
+                    RemainingHandshakeMilliseconds(handshakeDeadline));
                 if (!BootstrapHostHandshake.TryValidateReadyAcknowledgement(
                         acknowledgement,
                         out var contentGeneration,
@@ -325,18 +349,24 @@ namespace RageWebUI.Runtime
                 Interlocked.Exchange(ref _contentReady, 1);
                 _lastTracedContentGeneration = contentGeneration;
                 _lastTracedContentReady = 1;
-                _writer = new Thread(WriterLoop)
+                lock (_workerStartSync)
                 {
-                    IsBackground = true,
-                    Name = "REACTOR V bootstrap proxy writer",
-                };
-                _reader = new Thread(ReaderLoop)
-                {
-                    IsBackground = true,
-                    Name = "REACTOR V bootstrap proxy reader",
-                };
-                _writer.Start();
-                _reader.Start();
+                    if (Volatile.Read(ref _disposed) != 0)
+                        throw new OperationCanceledException(
+                            "The bootstrap runtime was disposed while attaching.");
+                    _writer = new Thread(WriterLoop)
+                    {
+                        IsBackground = true,
+                        Name = "REACTOR V bootstrap proxy writer",
+                    };
+                    _reader = new Thread(ReaderLoop)
+                    {
+                        IsBackground = true,
+                        Name = "REACTOR V bootstrap proxy reader",
+                    };
+                    _writer.Start();
+                    _reader.Start();
+                }
                 if (_startVisible)
                     SetVisible(true);
                 RuntimeTrace.Write(
@@ -350,6 +380,7 @@ namespace RageWebUI.Runtime
             catch (Exception error) when (
                 error is IOException ||
                 error is TimeoutException ||
+                error is OperationCanceledException ||
                 error is WaitHandleCannotBeOpenedException ||
                 error is UnauthorizedAccessException ||
                 error is InvalidOperationException ||
@@ -360,11 +391,26 @@ namespace RageWebUI.Runtime
                     _logDirectory,
                     "bootstrap_host_attach_failed",
                     $"pid={_gtaProcessId} type={error.GetType().Name} message={error.Message}");
-                _pipe?.Dispose();
-                _pipe = null;
+                if (error is TimeoutException)
+                    BootstrapHostWire.AbortOwnedStream(pipe!);
+                else
+                {
+                    try { pipe?.Dispose(); } catch { }
+                }
+                if (ReferenceEquals(_pipe, pipe)) _pipe = null;
                 Interlocked.Exchange(ref _hostProcessId, 0);
                 return false;
             }
+        }
+
+        private static int RemainingHandshakeMilliseconds(Stopwatch deadline)
+        {
+            var remaining = HelloAcknowledgementWaitMilliseconds -
+                (int)Math.Min(int.MaxValue, deadline.ElapsedMilliseconds);
+            if (remaining <= 0)
+                throw new TimeoutException(
+                    "The bootstrap hello acknowledgement did not arrive before its deadline.");
+            return remaining;
         }
 
         public void SetVisible(bool visible)
@@ -460,13 +506,20 @@ namespace RageWebUI.Runtime
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _attachmentGate.Dispose();
             // Closing a full-duplex pipe is the detach signal. Do not perform
             // one last synchronous write here: if the peer is already gone or
             // its read loop is unwinding, that write can indefinitely hold the
             // shared write lock and hang SHVDN AppDomain teardown.
             _stop.Set();
             _outgoingReady.Set();
-            try { _pipe?.Dispose(); } catch { }
+            BootstrapHostWire.AbortOwnedStream(_pipe!);
+            lock (_workerStartSync)
+            {
+                // An attachment may have been racing Dispose. The lock makes
+                // its reader/writer pair either fully started before join, or
+                // rejected before either worker can start.
+            }
             var teardown = Stopwatch.StartNew();
             JoinWithinBudget(_reader, teardown);
             JoinWithinBudget(_writer, teardown);
@@ -538,6 +591,9 @@ namespace RageWebUI.Runtime
                         var generation = message.Value<int?>("generation") ?? 0;
                         var protocol = message.Value<int?>("protocol") ?? 0;
                         var ready = message.Value<bool?>("ready") == true;
+                        Interlocked.Exchange(ref _verifiedHostSurface,
+                            protocol == BootstrapHostHandshake.ProtocolVersion && generation > 0
+                                ? HostSurfacePresentation.ReadState(message) : null);
                         if (protocol == BootstrapHostHandshake.ProtocolVersion && generation > 0)
                         {
                             var committedPresentationId =
@@ -635,6 +691,7 @@ namespace RageWebUI.Runtime
                 Interlocked.Exchange(ref _contentReady, 0);
                 Interlocked.Exchange(ref _hostSurfaceMode, HostSurfaceMode.None);
                 Interlocked.Exchange(ref _committedProviderPresentationId, null);
+                Interlocked.Exchange(ref _verifiedHostSurface, null);
                 Interlocked.Exchange(
                     ref _userIntentAuthorizedProviderPresentationId,
                     null);

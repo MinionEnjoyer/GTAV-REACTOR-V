@@ -341,6 +341,7 @@ namespace RageWebUI.Harness
         public int Width { get; private set; } = 1280;
         public int Height { get; private set; } = 720;
         public TimeSpan? Duration { get; private set; }
+        public TimeSpan ExternalGpuSurfaceStartDelay { get; private set; }
         public string? UiDirectory { get; private set; }
         public string? LocalDataDirectory { get; private set; }
         public TimeSpan BootstrapWarmDelay { get; private set; } = TimeSpan.FromMilliseconds(3500);
@@ -390,6 +391,16 @@ namespace RageWebUI.Harness
                         result.Duration = TimeSpan.FromSeconds(double.Parse(args[++index], CultureInfo.InvariantCulture));
                         break;
                     case "--smoke": result.Duration = TimeSpan.FromSeconds(6); break;
+                    case "--external-gpu-surface-start-delay-ms":
+                        var surfaceStartDelay = int.Parse(
+                            args[++index], CultureInfo.InvariantCulture);
+                        if (surfaceStartDelay < 0 || surfaceStartDelay > 30000)
+                            throw new ArgumentOutOfRangeException(
+                                nameof(args),
+                                "--external-gpu-surface-start-delay-ms must be between 0 and 30000.");
+                        result.ExternalGpuSurfaceStartDelay =
+                            TimeSpan.FromMilliseconds(surfaceStartDelay);
+                        break;
                     case "--ui": result.UiDirectory = Path.GetFullPath(args[++index]); break;
                     case "--local-data-dir":
                         result.LocalDataDirectory = Path.GetFullPath(args[++index]);

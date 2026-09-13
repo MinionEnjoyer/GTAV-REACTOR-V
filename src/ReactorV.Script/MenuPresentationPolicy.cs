@@ -11,6 +11,13 @@ namespace RageWebUI.Script
         YieldToDefaultOwner,
     }
 
+    internal enum ProviderIntentEscapeDisposition
+    {
+        ContinueNormalRouting,
+        CancelUnboundIntent,
+        ClosePresentation,
+    }
+
     internal static class MenuPresentationPolicy
     {
         internal const string EventName = "menu.presentation";
@@ -117,21 +124,60 @@ namespace RageWebUI.Script
         internal static ManagedF9EdgeDisposition ResolveManagedF9Edge(
             bool isPhysicalF9,
             bool hasDefaultMenuOwner,
-            bool defaultOwnerPresentationOrIntentActive)
+            bool defaultOwnerPresentationOrIntentActive,
+            bool inputLeaseActive = false)
         {
             if (!isPhysicalF9 ||
                 !ShouldDeferPhysicalF9ToExtension(hasDefaultMenuOwner))
                 return ManagedF9EdgeDisposition.GenericToggle;
 
-            return defaultOwnerPresentationOrIntentActive
+            // A physical-poll close may clear presentation state before the
+            // delayed SHVDN KeyDown arrives. The existing release lease still
+            // owns that closing edge: do not mint a new opening intent from it.
+            return defaultOwnerPresentationOrIntentActive || inputLeaseActive
                 ? ManagedF9EdgeDisposition.YieldToDefaultOwner
                 : ManagedF9EdgeDisposition.ArmDefaultOwnerInputIntent;
+        }
+
+        internal static bool ShouldExpirePendingProviderIntent(
+            long epoch, long deadlineMilliseconds, long elapsedMilliseconds) =>
+            epoch > 0 && (deadlineMilliseconds <= 0 || elapsedMilliseconds < 0 ||
+                elapsedMilliseconds > deadlineMilliseconds);
+
+        internal static ProviderIntentEscapeDisposition ResolveProviderIntentEscape(
+            bool pendingIntent, bool boundIntent, bool fallbackPresentation,
+            bool pendingPresentation)
+        {
+            if (boundIntent || fallbackPresentation || (pendingIntent && pendingPresentation))
+                return ProviderIntentEscapeDisposition.ClosePresentation;
+            // An unbound key intent is not a menu. Cancel its authority without
+            // hiding an unrelated surface or publishing a fabricated dismissal.
+            return pendingIntent
+                ? ProviderIntentEscapeDisposition.CancelUnboundIntent
+                : ProviderIntentEscapeDisposition.ContinueNormalRouting;
         }
 
         internal static bool ShouldServiceExtensionMenuQueue(
             bool storyModeReady,
             bool browserReady) =>
             storyModeReady && browserReady;
+
+        // The owner's physical-key poll can enqueue an opening before SHVDN
+        // delivers Reactor's KeyDown. Sample the actual held key at dispatch,
+        // not an extension-supplied claim or a guessed timestamp window. Never
+        // re-arm a replacement, startup request, closing edge or existing lease.
+        internal static bool ShouldArmDefaultOwnerAtDispatch(
+            bool managedF9Ready,
+            bool physicalF9Down,
+            bool gameForeground,
+            bool isDefaultOwner,
+            bool isStartupIntent,
+            bool hasSupersededPresentation,
+            bool presentationOrIntentActive,
+            bool debounceElapsed) =>
+            managedF9Ready && physicalF9Down && gameForeground && isDefaultOwner &&
+            !isStartupIntent && !hasSupersededPresentation &&
+            !presentationOrIntentActive && debounceElapsed;
 
         internal static bool ShouldReconcileHostHide(
             bool overlayRequestedVisible,

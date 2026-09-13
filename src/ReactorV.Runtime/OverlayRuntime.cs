@@ -16,6 +16,7 @@ namespace RageWebUI.Runtime
     public sealed class OverlayRuntime :
         IOverlayRuntime,
         IProviderPresentationCommitRuntime,
+        IHostSurfacePresentationRuntime,
         IProviderInputIntentRuntime,
         IContentGenerationRuntime,
         IBootstrapSurfaceRuntime,
@@ -63,6 +64,16 @@ namespace RageWebUI.Runtime
         }
 
         public bool IsVisible => _active?.IsVisible == true;
+        public bool IsHostSurfacePresented(string mode, int generation)
+        {
+            if (_active is IHostSurfacePresentationRuntime presentation)
+                return presentation.IsHostSurfacePresented(mode, generation);
+            // Preserve the existing injected renderer's visible-state boundary.
+            // It has no external HWND/desktop witness. Never use this fallback
+            // for a WebView host or an unknown runtime implementation.
+            return _active is DirectXRuntime && _active.IsVisible && generation > 0 &&
+                HostSurfaceMode.RequiresPaintProof(mode);
+        }
 
         public string RendererName => _active?.RendererName ?? "Renderer pending";
 

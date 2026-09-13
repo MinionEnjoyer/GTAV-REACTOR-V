@@ -160,7 +160,7 @@ public sealed class SplashStoryManagedLifecycleContractTests
         AssertOrdered(
             commit,
             "OwnsFinalRevealOffscreenLease(generation)",
-            "NativeMethods.SetWindowPos(",
+            "VerifiedWindowPromotion.Apply(",
             "CommitFinalRevealOffscreenLease(generation)",
             "CommitProviderInputAfterRevealFence();");
         Assert.DoesNotContain("CapturePreviewAsync", commit);
