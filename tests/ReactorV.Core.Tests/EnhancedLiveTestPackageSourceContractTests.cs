@@ -179,7 +179,24 @@ namespace RageWebUI.Core.Tests
                 install,
                 StringComparison.Ordinal);
             Assert.Contains(
-                "The protected ALLIN1 artwork root may contain only PNG files",
+                "The protected ALLIN1 asset root may contain only PNG files or approved catalogue indexes",
+                install,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "$isApprovedCatalogueIndex = @(",
+                install,
+                StringComparison.Ordinal);
+            foreach (var approvedIndex in new[]
+            {
+                "generated-gear/index.json",
+                "generated-vehicles/index.json",
+                "generated-weapons/index.json",
+            })
+            {
+                Assert.Contains(approvedIndex, install, StringComparison.Ordinal);
+            }
+            Assert.Contains(
+                "-not $isApprovedCatalogueIndex",
                 install,
                 StringComparison.Ordinal);
             Assert.Contains(

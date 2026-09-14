@@ -45,6 +45,7 @@ older release references. See its bundled README for reference selection and lim
 - [Make a mod with Reactor](docs/EXTENSIONS.md) — managed extensions, starter examples and ownership.
 - [Browser API](docs/API.md) — interface-to-game contracts.
 - [Source setup](docs/GETTING-STARTED.md#build-and-verify-from-source) — building and package checks.
+- [Release checklist](docs/RELEASING.md) — runtime packages and the matching diagnostic checker.
 - [Architecture](docs/ARCHITECTURE.md) · [Graphics tests](docs/DIRECTX-HARNESS.md) · [Live acceptance](docs/LIVE-ACCEPTANCE.md).
 
 [Support the project](https://buymeacoffee.com/minionenjoyer) ·

@@ -4,6 +4,12 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# This child can inherit pwsh's PSModulePath through dotnet into Windows
+# PowerShell. Load the built-in utility module by its own PSHOME path before
+# extracting the installer helpers, rather than depending on autoload lookup.
+$utilityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+Import-Module -Name $utilityModule -Force -ErrorAction Stop
+
 function Assert-OwnershipTest {
     param(
         [Parameter(Mandatory)] [bool]$Condition,

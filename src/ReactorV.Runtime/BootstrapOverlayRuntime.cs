@@ -21,6 +21,7 @@ namespace RageWebUI.Runtime
     internal sealed class BootstrapOverlayRuntime :
         IOverlayRuntime,
         IProviderPresentationCommitRuntime,
+        IHostSurfacePresentationRuntime,
         IProviderInputIntentRuntime,
         IContentGenerationRuntime,
         IBootstrapSurfaceRuntime,
@@ -63,6 +64,7 @@ namespace RageWebUI.Runtime
         private int _hostProcessId;
         private string _hostSurfaceMode = HostSurfaceMode.None;
         private string? _committedProviderPresentationId;
+        private HostSurfacePresentation? _verifiedHostSurface;
         private string? _userIntentAuthorizedProviderPresentationId;
         private int _bootstrapSurfaceRetirementPending;
         private int _bootstrapSurfaceRetirementRequiresHidden;
@@ -88,6 +90,8 @@ namespace RageWebUI.Runtime
         }
 
         public bool IsVisible => Volatile.Read(ref _visible) == 1;
+        public bool IsHostSurfacePresented(string mode, int generation) =>
+            IsVisible && Volatile.Read(ref _verifiedHostSurface)?.Matches(mode, generation) == true;
 
         public string RendererName => "Bootstrap WebView2";
 
@@ -583,6 +587,9 @@ namespace RageWebUI.Runtime
                         var generation = message.Value<int?>("generation") ?? 0;
                         var protocol = message.Value<int?>("protocol") ?? 0;
                         var ready = message.Value<bool?>("ready") == true;
+                        Interlocked.Exchange(ref _verifiedHostSurface,
+                            protocol == BootstrapHostHandshake.ProtocolVersion && generation > 0
+                                ? HostSurfacePresentation.ReadState(message) : null);
                         if (protocol == BootstrapHostHandshake.ProtocolVersion && generation > 0)
                         {
                             var committedPresentationId =
@@ -680,6 +687,7 @@ namespace RageWebUI.Runtime
                 Interlocked.Exchange(ref _contentReady, 0);
                 Interlocked.Exchange(ref _hostSurfaceMode, HostSurfaceMode.None);
                 Interlocked.Exchange(ref _committedProviderPresentationId, null);
+                Interlocked.Exchange(ref _verifiedHostSurface, null);
                 Interlocked.Exchange(
                     ref _userIntentAuthorizedProviderPresentationId,
                     null);
