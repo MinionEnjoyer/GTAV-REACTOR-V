@@ -184,6 +184,33 @@ public sealed class DesktopPresentationProbeSourceContractTests
     }
 
     [Fact]
+    public void ProductionDesktopWitnessExtractsAndAuthorizesOnlyTheExactEightCellMarker()
+    {
+        var child = ReadRepositoryFile(
+            "src", "ReactorV.Preloader", "DesktopPresentationProbeChild.cs");
+        var client = ReadRepositoryFile(
+            "src", "ReactorV.Runtime", "DesktopPresentationProbeClient.cs");
+        var overlay = ReadRepositoryFile(
+            "src", "ReactorV.Runtime", "OverlayWindow.cs");
+        var analysis = Region(
+            overlay,
+            "private static BrowserPaintEvidence AnalyzePresentationPixels(",
+            "private static bool HasPaintIdentityMarker(");
+        var reveal = Region(
+            overlay,
+            "private async Task<bool> VerifyFinalRevealSurfacePixelsAsync(",
+            "private async void FinalizeDeferredRevealAfterBrowserEventDrain(");
+
+        Assert.Contains("desktop.Clear();", analysis);
+        Assert.Contains("for (var byteIndex = 0; byteIndex < 8; byteIndex++)", analysis);
+        Assert.Contains("markerX + byteIndex * markerStride", analysis);
+        Assert.Contains("evidence.PaintIdentityMarkerMatched", reveal);
+        Assert.Contains("verified = leaseCurrent && evidence.IsConcrete", reveal);
+        Assert.Contains("targetSizeMatches && paintIdentityMarkerMatches", reveal);
+        Assert.Contains("RequiredIdentitySampleCount = 8", client);
+    }
+
+    [Fact]
     public void ProductionPackageRetainsPreloaderSharpDxDependencies()
     {
         var project = ReadRepositoryFile(
