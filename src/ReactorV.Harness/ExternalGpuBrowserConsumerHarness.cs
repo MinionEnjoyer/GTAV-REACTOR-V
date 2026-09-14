@@ -63,6 +63,9 @@ namespace RageWebUI.Harness
 
                 if (options.ExternalGpuSurfaceStartDelay > TimeSpan.Zero)
                 {
+                    // Self-test-only late-device scenario: coordination events
+                    // already exist, so Preloader can enter deferred adapter
+                    // discovery before this process creates its swap chain.
                     Console.WriteLine(
                         "CONSUMER DELAYING SURFACE START: scenario=external-gpu-consumer " +
                         $"delayMs={options.ExternalGpuSurfaceStartDelay.TotalMilliseconds:0}");

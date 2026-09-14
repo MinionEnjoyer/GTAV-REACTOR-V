@@ -238,6 +238,8 @@ function Invoke-ApiQualification {
             throw "The packaged $Api trace contains a fallback or fault: $tracePath"
         }
         if ($LateAdapterDelayMilliseconds -gt 0) {
+            # Adapter discovery belongs to the DirectX producer, which writes
+            # to the profile-root runtime trace rather than the preloader log.
             $runtimeTracePath = Join-Path $profileDirectory 'reactorv-runtime.log'
             $runtimeTrace = Read-SharedText -Path $runtimeTracePath
             Assert-OrderedStages -Trace $runtimeTrace -Stages @(

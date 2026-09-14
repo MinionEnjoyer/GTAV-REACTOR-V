@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RageWebUINative VERSION 0.2.4 LANGUAGES C CXX)
+project(RageWebUINative VERSION 0.2.5 LANGUAGES C CXX)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR
@@ -283,6 +283,10 @@ if(BUILD_TESTING)
         $<TARGET_FILE:ReactorV.DxgiImportFixture>)
     set_tests_properties(ReactorV.AppLocalDxgi PROPERTIES TIMEOUT 60)
 
+    add_executable(ReactorV.NativeDiagnosticTrace.Tests tests/NativeDiagnosticTraceTests.cpp)
+    target_include_directories(ReactorV.NativeDiagnosticTrace.Tests PRIVATE src)
+    target_compile_definitions(ReactorV.NativeDiagnosticTrace.Tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_test(NAME ReactorV.NativeDiagnosticTrace COMMAND ReactorV.NativeDiagnosticTrace.Tests)
     add_executable(ReactorV.NativeLifecycleLog.Tests
         tests/NativeLifecycleLogTests.cpp src/NativeLifecycleLog.cpp)
     target_include_directories(ReactorV.NativeLifecycleLog.Tests PRIVATE src

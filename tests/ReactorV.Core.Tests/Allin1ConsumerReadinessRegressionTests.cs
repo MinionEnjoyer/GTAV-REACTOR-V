@@ -7,9 +7,9 @@ using Xunit;
 namespace RageWebUI.Core.Tests;
 
 /// <summary>
-/// Consumer regressions for the two menu contracts used by ALLIN1 GBAY and
-/// Chop. The Chop fixture uses its public extension ID but exercises Reactor's
-/// registry contract rather than copying the external plug-in.
+/// Consumer regressions for ALLIN1 GBAY, its passive speedometer publication,
+/// and Chop. The Chop fixture uses its public extension ID but exercises
+/// Reactor's registry contract rather than copying the external plug-in.
 /// </summary>
 [Collection(ReactorIntegrationCollection.Name)]
 public sealed class Allin1ConsumerReadinessRegressionTests : IDisposable
@@ -104,6 +104,38 @@ public sealed class Allin1ConsumerReadinessRegressionTests : IDisposable
         Assert.True(ReactorHostApi.MarkMenuPresentationReady(chopId));
         Assert.True(chopState.IsMenuPresentationReady("companion"));
         Assert.False(gbayState.IsMenuPresentationReady("home"));
+    }
+
+    [Fact]
+    public void SpeedometerPublishingBeforeRendererDoesNotOpenMenuOrAcquireInput()
+    {
+        using var speedometer = ReactorApi.RegisterExtension(
+            new ReactorExtensionDescriptor(
+                "allin1.gbay", "ALLIN1 speedometer", "1.0.0",
+                capabilities: new[] { PassiveHudContract.Capability }),
+            builder => builder.AddEvent(new ReactorEventDescriptor(
+                PassiveHudContract.EventId, "Passive driving readout")));
+        var frame = new JObject
+        {
+            ["schema"] = 1,
+            ["visible"] = true,
+            ["kind"] = "speedometer",
+            ["speed"] = 42,
+            ["units"] = "MPH",
+            ["gear"] = "3",
+            ["manual"] = false,
+            ["notice"] = "",
+        };
+
+        // Publication is independent of a menu renderer. It must not mint a
+        // menu intent or grant pointer/input authority while the renderer is
+        // unavailable.
+        Assert.True(speedometer.TryPublishEvent(PassiveHudContract.EventId, frame));
+        Assert.Single(ReactorHostApi.DrainEvents());
+        Assert.Empty(ReactorHostApi.DrainMenuPresentations());
+        Assert.False(MenuPresentationPolicy.ShouldAcquireManagedInputLease(
+            overlayRequestedVisible: true, overlayPresented: true,
+            MenuPresentationPolicy.PendingPresentationInputMode));
     }
 
     private static IReactorExtensionHandle RegisterMenuConsumer(

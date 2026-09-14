@@ -1,6 +1,7 @@
 using System;
 using Newtonsoft.Json.Linq;
 using ReactorV.Integration;
+using RageWebUI.Script;
 using Xunit;
 
 namespace RageWebUI.Core.Tests;
@@ -11,6 +12,53 @@ public sealed class AtomicMenuReplacementApiTests : IDisposable
     public AtomicMenuReplacementApiTests() => ReactorHostApi.Reset();
 
     public void Dispose() => ReactorHostApi.Reset();
+
+    [Fact]
+    public void RegistryHiddenBeforePaintFailureCleansOldIntentWithoutRevokingFreshReplacement()
+    {
+        using var extension = ReactorApi.RegisterExtension(
+            new ReactorExtensionDescriptor("failure.fixture", "Failure fixture", "1.0.0",
+                capabilities: new[] { "menu.routes", ReactorExtensionCapabilities.DefaultF9MenuOwner }),
+            builder => builder.AddAction(new ReactorActionDescriptor("read", "Read", ReactorActionRisk.Read),
+                (_, __) => ReactorActionResult.Success()).AddMenu(Menu("home", "Home")));
+        var menus = (IReactorMenuPresentationHandle)extension;
+        var host = new ProviderInputIntentGate(7);
+        ReactorHostApi.SetMenuPresentationHostAvailable(true);
+        Assert.True(menus.TryPresentMenu("home"));
+        var firstId = Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<string>("presentationId")!;
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive("failure.fixture", "home", firstId, out _));
+        Assert.True(host.TryArm(new ProviderInputIntentToken(7, 1, 1500), 100));
+        Assert.True(host.TryBind(7, 1, firstId, 101));
+        long epoch = 1;
+        string? bound = firstId, fallback = null;
+
+        Assert.NotNull(ReactorHostApi.TakeActiveMenuPresentation());
+        Assert.False(ReactorHostApi.CanMarkMenuPresentationReady(firstId));
+        Assert.Null(ReactorHostApi.AcknowledgeMenuPresentationHidden(firstId));
+        Assert.True(ProviderPresentationInputCleanup.TryRevoke(firstId,
+            ref epoch, ref bound, ref fallback, out var revoked));
+        host.Cancel(7, revoked);
+        Assert.False(host.TryConsume(firstId, 200, out _));
+
+        Assert.True(menus.TryPresentMenu("home"));
+        var secondId = Assert.Single(ReactorHostApi.DrainMenuPresentations()).Value<string>("presentationId")!;
+        Assert.NotEqual(firstId, secondId);
+        Assert.True(ReactorHostApi.MarkMenuPresentationActive("failure.fixture", "home", secondId, out _));
+        Assert.True(host.TryArm(new ProviderInputIntentToken(7, 2, 1500), 300));
+        Assert.True(host.TryBind(7, 2, secondId, 301));
+        epoch = 2;
+        bound = secondId;
+
+        Assert.False(ProviderPresentationInputCleanup.TryRevoke(firstId,
+            ref epoch, ref bound, ref fallback, out revoked));
+        host.Cancel(7, revoked);
+        Assert.Null(ReactorHostApi.AcknowledgeMenuPresentationHidden(firstId));
+        Assert.True(ReactorHostApi.CanMarkMenuPresentationReady(secondId));
+        Assert.Equal(2, epoch);
+        Assert.True(host.TryConsume(secondId, 302, out _));
+        Assert.True(ReactorHostApi.MarkMenuPresentationReady(secondId));
+        Assert.True(((IReactorMenuPresentationStateHandle)extension).IsMenuPresentationReady("home"));
+    }
 
     [Theory]
     [InlineData("home", "vehicles")]

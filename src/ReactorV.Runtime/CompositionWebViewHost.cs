@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -19,6 +20,11 @@ namespace RageWebUI.Runtime
     internal sealed class CompositionWebViewHost : IDisposable
     {
         private readonly Form _owner;
+        private readonly Action<string, string?> _trace;
+        private readonly CancellationTokenSource _startupLifetime = new CancellationTokenSource();
+        private bool _controllerCreationInProgress;
+        private bool _controllerStartupAbandoned;
+        private int _creationAttempt;
         private CoreWebView2CompositionController? _controller;
         private DirectCompositionDevice? _composition;
         private IntPtr _inputParentWindow;
@@ -27,9 +33,10 @@ namespace RageWebUI.Runtime
         private bool _disposed;
         private bool _controllerVisible;
 
-        internal CompositionWebViewHost(Form owner)
+        internal CompositionWebViewHost(Form owner, Action<string, string?> trace)
         {
             _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+            _trace = trace ?? throw new ArgumentNullException(nameof(trace));
             _owner.ClientSizeChanged += OnOwnerClientSizeChanged;
             _owner.LocationChanged += OnOwnerLocationChanged;
             _owner.ParentChanged += OnOwnerLocationChanged;
@@ -42,6 +49,9 @@ namespace RageWebUI.Runtime
         internal bool IsControllerReady => !_disposed && _controller != null;
 
         internal bool IsControllerVisible => !_disposed && _controllerVisible;
+
+        internal double RasterizationScale => !_disposed && _controller != null
+            ? _controller.RasterizationScale : double.NaN;
 
         internal int CompositionGeneration => _composition?.Generation ?? 0;
 
@@ -61,6 +71,10 @@ namespace RageWebUI.Runtime
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CompositionWebViewHost));
             if (_controller != null) return;
+            if (_controllerStartupAbandoned) throw new InvalidOperationException(
+                "This WebView2 host abandoned startup; it cannot start an overlapping controller request.");
+            if (_controllerCreationInProgress) throw new InvalidOperationException(
+                "WebView2 controller creation is already in progress.");
 
             // Accessing Handle is intentional and occurs on the overlay's STA
             // thread. It creates the top-level HWND before DirectComposition is
@@ -69,24 +83,55 @@ namespace RageWebUI.Runtime
             var inputParent = _inputParentWindow != IntPtr.Zero
                 ? _inputParentWindow
                 : window;
-            var options = environment.CreateCoreWebView2ControllerOptions();
-            options.DefaultBackgroundColor = Color.Transparent;
+            if (_owner.InvokeRequired || Thread.CurrentThread.GetApartmentState() != ApartmentState.STA ||
+                SynchronizationContext.Current == null)
+                throw new InvalidOperationException("WebView2 controller creation requires its owner STA and UI synchronization context.");
+            var attempt = ++_creationAttempt;
+            void Trace(string stage, string? detail) => _trace(stage,
+                $"attempt={attempt} overlay=0x{window.ToInt64():X} parent=0x{inputParent.ToInt64():X} " + detail);
+            using var deadline = new ControllerStartupDeadline(Trace);
+            _controllerCreationInProgress = true;
             CoreWebView2CompositionController? controller = null;
             DirectCompositionDevice? composition = null;
             try
             {
+                deadline.Stage("options_begin");
+                var options = environment.CreateCoreWebView2ControllerOptions();
+                options.DefaultBackgroundColor = Color.Transparent;
+                deadline.ThrowIfExpired();
+                deadline.Stage("composition_device_begin");
                 composition = DirectCompositionDevice.Create(window);
-                controller = await environment.CreateCoreWebView2CompositionControllerAsync(
+                deadline.ThrowIfExpired();
+                deadline.Stage("composition_device_ready");
+                deadline.Stage("request_begin");
+                var creation = environment.CreateCoreWebView2CompositionControllerAsync(
                     inputParent,
                     options);
+                deadline.Stage("request_returned");
+                // Own the returned task even if a synchronous call consumed the
+                // deadline: a later controller must be closed on this same STA.
+                var bounded = new BoundedResourceCreation<CoreWebView2CompositionController>(
+                    creation, deadline.Expired, _startupLifetime.Token,
+                    late => late.Close(),
+                    (stage, error) => Trace("webview_controller_" + stage,
+                        error == null ? null : $"type={error.GetType().Name} hresult=0x{error.HResult:X8}"));
+                controller = await bounded.WaitAsync();
+                deadline.Stage("request_completed");
+                if (_disposed || _owner.IsDisposed || _startupLifetime.IsCancellationRequested)
+                    throw new OperationCanceledException("WebView2 owner closed during controller creation.");
+                deadline.ThrowIfExpired();
                 controller.DefaultBackgroundColor = Color.Transparent;
                 controller.IsVisible = true;
+                // COM setters may dispatch messages. Recheck before publishing.
+                if (_disposed || _owner.IsDisposed || _startupLifetime.IsCancellationRequested)
+                    throw new OperationCanceledException("WebView2 owner closed before controller publication.");
                 _controllerVisible = true;
                 _composition = composition;
                 _controller = controller;
                 composition = null;
                 controller = null;
 
+                deadline.Stage("initial_bind_begin");
                 var bound = ApplyCompositionMutation(
                     CompositionMutation.InitialBind);
                 if (!bound.Succeeded)
@@ -95,15 +140,23 @@ namespace RageWebUI.Runtime
                         "The WebView2 composition root could not be bound.",
                         bound.HResult);
                 }
+                deadline.Complete();
+                deadline.Stage("initial_bind_ready");
             }
-            catch
+            catch (Exception error)
             {
+                if (error is TimeoutException || error is OperationCanceledException)
+                    _controllerStartupAbandoned = true;
+                Trace("webview_controller_attempt_failed",
+                    $"type={error.GetType().Name} hresult=0x{error.HResult:X8} abandoned={_controllerStartupAbandoned}");
                 var failedController = _controller ?? controller;
                 _controller = null;
                 if (failedController != null)
                 {
                     try { failedController.Close(); }
-                    catch (COMException) { }
+                    catch (Exception cleanupError) when (cleanupError is COMException ||
+                        cleanupError is InvalidOperationException || cleanupError is ObjectDisposedException)
+                    { Trace("webview_controller_close_failed", $"type={cleanupError.GetType().Name}"); }
                 }
                 var failedComposition = _composition ?? composition;
                 _composition = null;
@@ -111,6 +164,7 @@ namespace RageWebUI.Runtime
                 _controllerVisible = false;
                 throw;
             }
+            finally { _controllerCreationInProgress = false; }
         }
 
         /// <summary>
@@ -591,6 +645,7 @@ namespace RageWebUI.Runtime
         {
             if (_disposed) return;
             _disposed = true;
+            _startupLifetime.Cancel();
             _controllerVisible = false;
             _owner.ClientSizeChanged -= OnOwnerClientSizeChanged;
             _owner.LocationChanged -= OnOwnerLocationChanged;

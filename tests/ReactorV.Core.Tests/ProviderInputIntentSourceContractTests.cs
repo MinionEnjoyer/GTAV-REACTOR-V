@@ -7,6 +7,82 @@ namespace RageWebUI.Core.Tests;
 public sealed class ProviderInputIntentSourceContractTests
 {
     [Fact]
+    public void FailedOrHiddenPresentationRevokesItsExactInputEvenAfterRegistryRemoval()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var abort = Region(script, "private bool AbortPresentationTransfer(", "private string CurrentHostSurface");
+        Assert.Contains("RevokeProviderPresentationInputIntent(exactPresentationId, reason);", abort);
+        Assert.True(abort.IndexOf("RevokeProviderPresentationInputIntent(", StringComparison.Ordinal) <
+            abort.IndexOf("if (dismissal == null)", StringComparison.Ordinal));
+        var pending = Region(script, "private void CancelPendingProviderPresentation(", "private bool AbortPresentationTransfer(");
+        Assert.Contains("RevokeProviderPresentationInputIntent(presentationId, reason);", pending);
+        var publish = Region(script, "private void PublishActiveMenuDismissed(", "private void TraceRuntime(");
+        Assert.Contains("RevokeProviderPresentationInputIntent(expectedPresentationId, reason);", publish);
+        Assert.Contains("RevokeProviderPresentationInputIntent(dismissal.Value<string>(\"presentationId\"), reason);", publish);
+    }
+
+    [Fact]
+    public void ExactCleanupCannotCancelPendingInputOrMutateGlobalMenuState()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var cleanup = Region(script, "private void RevokeProviderPresentationInputIntent(",
+            "private void ExpirePendingProviderInputIntent(");
+        Assert.Contains("ProviderPresentationInputCleanup.TryRevoke(", cleanup);
+        Assert.Contains("ref _boundProviderInputIntentEpoch", cleanup);
+        Assert.Contains("ref _boundProviderInputIntentPresentationId", cleanup);
+        Assert.Contains("ref _userIntentFallbackPresentationId", cleanup);
+        Assert.Contains("if (revokedEpoch > 0", cleanup);
+        Assert.Contains("CancelProviderInputIntent(Process.GetCurrentProcess().Id, revokedEpoch)", cleanup);
+        Assert.DoesNotContain("CancelProviderInputIntent();", cleanup);
+        foreach (var forbidden in new[] { "_pendingProviderInputIntent", "_inputMode =", "_overlayRequestedVisible =",
+            "SetVisible(", "CloseOverlay(", "PublishActiveMenuDismissed(", "_menuInputLease", "PostCoreEvent(" })
+            Assert.DoesNotContain(forbidden, cleanup);
+    }
+
+    [Fact]
+    public void DelayedDefaultOwnerCloseEdgeRespectsTheExistingReleaseLease()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var key = Region(script, "private void OnKeyDown(", "private void ArmProviderInputIntent(");
+        var resolution = Region(key, "var managedF9Disposition =", "if (managedF9Disposition ==");
+        Assert.Contains("_menuInputLease.SuppressGameInput", resolution);
+    }
+
+    [Fact]
+    public void UnboundIntentExpiryIsServicedWithoutAnotherPresentation()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var tick = Region(script, "private void OnTickCore()", "private void OnKeyDown(");
+        var key = Region(script, "private void OnKeyDown(", "private void ArmProviderInputIntent(");
+        Assert.Contains("ExpirePendingProviderInputIntent(", tick);
+        Assert.Contains("ExpirePendingProviderInputIntent(", key);
+        Assert.True(tick.IndexOf("ExpirePendingProviderInputIntent(", StringComparison.Ordinal) <
+            tick.IndexOf("DrainMenuPresentations();", StringComparison.Ordinal));
+        Assert.True(key.IndexOf("ExpirePendingProviderInputIntent(", StringComparison.Ordinal) <
+            key.IndexOf("var defaultOwnerPresentationOrIntentActive =", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EmptyIntentEscapeAndExpiryCannotMutateMenuVisibility()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var emptyEscape = Region(script,
+            "if (escapeDisposition == ProviderIntentEscapeDisposition.CancelUnboundIntent)",
+            "if (!_storyModeReady)");
+        var expiry = Region(script, "private void ExpirePendingProviderInputIntent(", "private void CloseOverlay(");
+        foreach (var region in new[] { emptyEscape, expiry }) {
+            Assert.Contains("CancelProviderInputIntent();", region);
+            Assert.DoesNotContain("CloseOverlay(", region);
+            Assert.DoesNotContain("SetVisible(", region);
+            Assert.DoesNotContain("PublishActiveMenuDismissed(", region);
+        }
+        Assert.DoesNotContain("SET_PAUSE_MENU_ACTIVE", script);
+        Assert.DoesNotContain("ENABLE_ALL_CONTROL_ACTIONS", script);
+        Assert.Contains("evidence=managed-keydown-not-frontend-delivery", script);
+        Assert.Contains("inputElapsedMilliseconds + 250", script);
+    }
+
+    [Fact]
     public void DefaultOwnerRoutesPhysicalF9BeforeGenericCloseAndBindsOnlyThatOwner()
     {
         var script = ReadRepositoryFile(
@@ -61,6 +137,24 @@ public sealed class ProviderInputIntentSourceContractTests
     }
 
     [Fact]
+    public void DispatchSamplesTrustedPhysicalStateAfterRegistryAcceptanceBeforeBinding()
+    {
+        var script = ReadRepositoryFile("src", "ReactorV.Script", "RageWebUiScript.cs");
+        var dispatch = Region(script, "private void DrainMenuPresentations()",
+            "private void TryAdvancePendingProviderPresentation(");
+        Assert.True(dispatch.IndexOf("ShouldArmDefaultOwnerAtDispatch(", StringComparison.Ordinal) >
+            dispatch.IndexOf("MarkMenuPresentationActive(", StringComparison.Ordinal));
+        Assert.True(dispatch.IndexOf("TryBindProviderInputIntent(", StringComparison.Ordinal) >
+            dispatch.IndexOf("ShouldArmDefaultOwnerAtDispatch(", StringComparison.Ordinal));
+        Assert.Contains("NativeMethods.IsPhysicalF9Down()", dispatch);
+        Assert.Contains("NativeMethods.IsGameForeground(_gtaWindow)", dispatch);
+        Assert.Contains("PreloadHandoff.ManagedOwnsF9", dispatch);
+        Assert.Contains("hasSupersededPresentation: superseded != null", dispatch);
+        Assert.Contains("_pendingProviderInputIntentEpoch > 0", dispatch);
+        Assert.Contains("source=physical-f9-held", dispatch);
+    }
+
+    [Fact]
     public void PipeCarriesProcessEpochAndExactPresentationWithoutBroadAuthority()
     {
         var client = ReadRepositoryFile(
@@ -81,35 +175,36 @@ public sealed class ProviderInputIntentSourceContractTests
     }
 
     [Fact]
-    public void CompositionFallbackConsumesExactIntentOnlyAfterPassiveCommit()
+    public void PhysicalIntentCannotReplaceDesktopProof()
     {
         var overlay = ReadRepositoryFile(
             "src", "ReactorV.Runtime", "OverlayWindow.cs");
-        var fallback = Region(
+        var probe = Region(
             overlay,
-            "private bool TryCompleteExplicitUserIntentReveal(",
+            "private async void BeginDesktopPresentationCommit(",
             "private void CompleteQualifiedReveal(");
-
-        Assert.Contains("OverlayTransferOwner.Provider", fallback);
-        Assert.Contains("CompositionCommittedVisible", fallback);
-        Assert.Contains("_providerInputIntentGate.TryConsume(", fallback);
-        Assert.Contains("transferIdentity.PresentationId", fallback);
-        Assert.Contains("ExplicitUserIntentAuthorized", fallback);
-        Assert.Contains("input_enabled=True close_contract=f9-or-escape", fallback);
-        Assert.DoesNotContain("DesktopPresentationVerified", fallback);
+        Assert.Contains("HandleDesktopPresentationFailure(", probe);
+        Assert.Contains("DesktopPresentationVerified", probe);
+        Assert.DoesNotContain("TryCompleteExplicitUserIntentReveal", overlay);
+        Assert.DoesNotContain("OverlayTransferPhase.ExplicitUserIntentAuthorized", overlay);
+        Assert.Contains("string presentationId) => false;", overlay);
+        Assert.True(probe.IndexOf("_providerInputIntentGate.TryConsume(", StringComparison.Ordinal) >
+            probe.IndexOf("_desktopPresentationPixelsVerified = true;", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void ExplicitInputHasBoundedFailClosedLeaseAndReconnectResetsAuthority()
+    public void BothRevealAndInputCommitRequireDesktopProofAndReconnectResetsAuthority()
     {
         var overlay = ReadRepositoryFile(
             "src", "ReactorV.Runtime", "OverlayWindow.cs");
 
-        Assert.Contains("ExplicitUserIntentInputLeaseMilliseconds", overlay);
-        Assert.Contains("BeginExplicitUserIntentInputLease(transferIdentity)", overlay);
-        Assert.Contains("webview_provider_input_intent_lease_expired", overlay);
-        Assert.Contains("action=fail-closed-hide", overlay);
-        Assert.Contains("_desiredVisible = false;", overlay);
+        var reveal = Region(overlay, "private void CompleteQualifiedReveal(",
+            "private void HandleDesktopPresentationFailure(");
+        var commit = Region(overlay, "private void CommitProviderInputAfterRevealFence()",
+            "private void PublishProviderPresentationCommitted(");
+        Assert.Contains("!_desktopPresentationPixelsVerified", reveal);
+        Assert.Contains("!_desktopPresentationPixelsVerified", commit);
+        Assert.DoesNotContain("ExplicitUserIntentInputLeaseMilliseconds", overlay);
         Assert.Contains("_providerInputIntentGate.BeginProviderSession(", overlay);
         Assert.Contains("_providerInputIntentGate.RevokeProviderSession(", overlay);
     }

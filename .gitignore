@@ -11,6 +11,8 @@ src/**/bin/
 src/**/obj/
 tests/**/bin/
 tests/**/obj/
+tools/**/bin/
+tools/**/obj/
 examples/**/bin/
 examples/**/obj/
 tools/**/bin/

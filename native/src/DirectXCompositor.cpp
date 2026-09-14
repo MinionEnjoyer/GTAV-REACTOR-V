@@ -1,6 +1,7 @@
 #include "DirectXCompositor.h"
 #include "D3D11DeviceProbe.h"
 #include "DxgiHookPolicy.h"
+#include "NativeDiagnosticTrace.h"
 
 namespace rwui {
 
@@ -153,8 +154,23 @@ void DirectXCompositor::DrainPendingPreparationRequest() noexcept {
 }
 
 void DirectXCompositor::PreparationWorker() noexcept {
+    ULONGLONG nextHeartbeat{};
     while (!preparationStop_.load(std::memory_order_acquire)) {
         WaitForSingleObject(preparationEvent_, 100);
+        const auto now = GetTickCount64();
+        if (now >= nextHeartbeat) {
+            nextHeartbeat = now + 5000;
+            RecordNativeDiagnostic("diagnostic_worker_heartbeat", 0, nullptr,
+                preparationEpoch_.load(std::memory_order_acquire));
+            Microsoft::WRL::ComPtr<ID3D11Device> diagnosticDevice;
+            {
+                std::unique_lock lock(mutex_, std::try_to_lock);
+                if (lock.owns_lock()) diagnosticDevice = d3d11Device_;
+            }
+            if (diagnosticDevice) RecordNativeDiagnostic("diagnostic_device_status",
+                diagnosticDevice->GetDeviceRemovedReason(), diagnosticDevice.Get());
+        }
+        DrainNativeDiagnostics();
         if (preparationStop_.load(std::memory_order_acquire)) break;
         if (preparationRequestGate_.test_and_set(
                 std::memory_order_acquire)) continue;
@@ -178,6 +194,7 @@ void DirectXCompositor::PreparationWorker() noexcept {
         swapChain->Release();
         if (queue != nullptr) queue->Release();
     }
+    DrainNativeDiagnostics();
 }
 
 bool DirectXCompositor::Prepare(
@@ -197,6 +214,9 @@ bool DirectXCompositor::Prepare(
             expectedPreparationEpoch != preparationEpoch_.load(
                 std::memory_order_acquire)) return false;
         if (resizingSwapChain_ == swapChain) return false;
+        const bool diagnostic = prepareDiagnosticGate.Take(GetTickCount64());
+        if (diagnostic) RecordNativeDiagnostic("diagnostic_prepare_enter", 0,
+            swapChain, preparationEpoch_.load(std::memory_order_acquire));
         const bool deviceInvalidated = deviceInvalidated_.exchange(
             false, std::memory_order_acq_rel);
         if (deviceInvalidated && activeSwapChain_ == swapChain) {
@@ -268,6 +288,14 @@ bool DirectXCompositor::Prepare(
             api_ == RwuiRenderApi::Direct3D12 ? d3d12Queue_.Get() : nullptr,
             std::memory_order_release);
         preparedSwapChain_.store(swapChain, std::memory_order_release);
+        if (diagnostic) RecordNativeDiagnostic("diagnostic_prepare_ready",
+            static_cast<int>(api_), swapChain, preparationEpoch_.load(std::memory_order_acquire));
+        if (diagnostic && api_ == RwuiRenderApi::Direct3D12) {
+            RecordNativeDiagnostic("diagnostic_d3d12_interop_generation", 0,
+                d3d12Queue_.Get(), D3D12InteropGeneration());
+            RecordNativeDiagnostic("diagnostic_d3d12_backbuffer_generation", 0,
+                swapChain, D3D12BackBufferGeneration());
+        }
         return true;
     } catch (...) {
         Reset();
@@ -364,6 +392,8 @@ bool DirectXCompositor::BeforeResize(IDXGISwapChain* swapChain) noexcept {
     try {
         std::scoped_lock lock(mutex_);
         preparationEpoch_.fetch_add(1, std::memory_order_acq_rel);
+        RecordNativeDiagnostic("diagnostic_backbuffers_retire_enter", 0,
+            swapChain, preparationEpoch_.load(std::memory_order_acquire));
         resizingSwapChain_ = swapChain;
         const bool retired = activeSwapChain_ != swapChain ||
             (api_ == RwuiRenderApi::Direct3D12
@@ -372,6 +402,8 @@ bool DirectXCompositor::BeforeResize(IDXGISwapChain* swapChain) noexcept {
                     ? ReleaseD3D11BackBuffersUnlocked()
                     : ResetUnlocked(true));
         blockedPreparationSwapChain_ = retired ? nullptr : swapChain;
+        RecordNativeDiagnostic("diagnostic_backbuffers_retire_exit", retired ? 1 : 0,
+            swapChain, preparationEpoch_.load(std::memory_order_acquire));
         return retired;
     } catch (...) {
         blockedPreparationSwapChain_ = swapChain;
@@ -385,6 +417,8 @@ void DirectXCompositor::AfterResize(IDXGISwapChain* swapChain) noexcept {
         if (resizingSwapChain_ == swapChain) {
             resizingSwapChain_ = nullptr;
             preparationEpoch_.fetch_add(1, std::memory_order_acq_rel);
+            RecordNativeDiagnostic("diagnostic_resize_epoch_complete", 0,
+                swapChain, preparationEpoch_.load(std::memory_order_acquire));
         }
     } catch (...) {
     }

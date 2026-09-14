@@ -9,7 +9,7 @@
     <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <Version>0.2.4</Version>
+    <Version>0.2.5</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
@@ -33,6 +33,9 @@
 
   <ItemGroup>
     <Reference Include="System.Drawing" />
+    <Compile Include="..\Shared\DesktopProbeGeometry.cs" Link="DesktopProbeGeometry.cs" />
+    <Compile Include="..\Shared\DesktopCaptureColor.cs" Link="DesktopCaptureColor.cs" />
+    <Compile Include="..\Shared\DesktopProbeProgress.cs" Link="DesktopProbeProgress.cs" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 

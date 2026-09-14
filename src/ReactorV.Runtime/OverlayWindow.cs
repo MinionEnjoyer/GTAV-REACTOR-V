@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -38,7 +39,6 @@ namespace RageWebUI.Runtime
         private const int DesktopPaintSettleMilliseconds = 24;
         private const int MaximumDesktopPaintSamples = 24;
         private const int DesktopPresentationProbeTimeoutMilliseconds = 900;
-        private const int ExplicitUserIntentInputLeaseMilliseconds = 2500;
 
         private IntPtr _gtaWindow;
         private readonly uint _gtaProcessId;
@@ -62,6 +62,12 @@ namespace RageWebUI.Runtime
             new OverlayTransferStateMachine();
         private readonly ProviderInputIntentGate _providerInputIntentGate;
         private readonly System.Windows.Forms.Timer _boundsTimer;
+        private readonly System.Windows.Forms.Timer _passiveHudWatchdog;
+        private readonly PassiveHudHostLease _passiveHudLease = new PassiveHudHostLease();
+        private bool _passiveHudFrameRejectionLogged;
+        private HostSurfacePresentation? _verifiedHostSurface;
+        public event Action<HostSurfacePresentation?>? HostSurfacePresentationChanged;
+        public event Action<int>? PassiveHudLeaseExpired;
         private CompositionWebViewHost _webView;
         private CoreWebView2? _attachedCore;
         private readonly Queue<string> _pendingMessages = new Queue<string>();
@@ -113,8 +119,6 @@ namespace RageWebUI.Runtime
         private string? _acceptedMenuPresentationId;
         private string? _committedProviderInputPresentationId;
         private string? _publishedProviderPresentationId;
-        private string? _userIntentAuthorizedProviderPresentationId;
-        private int _explicitUserIntentInputLeaseGeneration;
         private int _providerInputCommitGeneration;
         private int _providerSessionGeneration;
         private string? _pendingPresentationReadyRequestId;
@@ -147,6 +151,7 @@ namespace RageWebUI.Runtime
         private int _bootstrapPaintProofControllerGeneration;
         private int _bootstrapPaintProofWidth;
         private int _bootstrapPaintProofHeight;
+        private double _bootstrapPaintProofRasterizationScale = double.NaN;
         private int _bootstrapPaintProofCompositionGeneration;
         private bool _bootstrapPaintProofConcrete;
         private bool _bootstrapPaintProofGenerationMarkerMatched;
@@ -230,8 +235,15 @@ namespace RageWebUI.Runtime
                     : HiddenBoundsPollMilliseconds,
             };
             _boundsTimer.Tick += (_, __) => SynchronizeBounds();
+            // Bounds polling pauses during asynchronous reveal proofs; this
+            // independent safety lease must keep running during those waits.
+            _passiveHudWatchdog = new System.Windows.Forms.Timer { Interval = 100 };
+            _passiveHudWatchdog.Tick += (_, __) => ExpirePassiveHud();
+            _passiveHudWatchdog.Start();
             FormClosed += (_, __) =>
             {
+                _passiveHudWatchdog.Dispose();
+                PublishHostSurfacePresentation(null);
                 _trace(
                     "webview_shutdown_dispose_begin",
                     $"input_parent=0x{_webViewInputParentWindow.ToInt64():X}");
@@ -247,9 +259,20 @@ namespace RageWebUI.Runtime
 
         protected override bool ShowWithoutActivation => true;
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _passiveHudWatchdog?.Dispose();
+                PublishHostSurfacePresentation(null);
+            }
+            base.Dispose(disposing);
+        }
+
         protected override void OnHandleCreated(EventArgs args)
         {
             base.OnHandleCreated(args);
+            LayeredWindowInput.Initialize(Handle, _trace);
             _windowPointerCaptureApplied = null;
             _overlayTopMostApplied = null;
             _ownedGameWindow = IntPtr.Zero;
@@ -304,6 +327,7 @@ namespace RageWebUI.Runtime
                 parameters.ExStyle |= NativeMethods.WsExNoActivate |
                     NativeMethods.WsExToolWindow |
                     NativeMethods.WsExTransparent |
+                    NativeMethods.WsExLayered |
                     NativeMethods.WsExNoRedirectionBitmap;
                 return parameters;
             }
@@ -436,10 +460,7 @@ namespace RageWebUI.Runtime
         }
 
         public bool IsProviderPresentationAuthorizedByUserIntent(
-            string presentationId) =>
-            ProviderPresentationCommitContract.Matches(
-                Volatile.Read(ref _userIntentAuthorizedProviderPresentationId),
-                presentationId);
+            string presentationId) => false;
 
         public int AcceptanceCaptureControllerGeneration => _controllerGeneration;
 
@@ -773,6 +794,7 @@ namespace RageWebUI.Runtime
                         return false;
                     }
 
+                    var captureScale = _webView.RasterizationScale;
                     var capture = _webView.CapturePreviewAsync();
                     var completed = await Task.WhenAny(
                         capture,
@@ -796,7 +818,8 @@ namespace RageWebUI.Runtime
                             await capture,
                             OverlayPresentationPolicy.HostPaintIdentity(
                                 mode,
-                                surfaceGeneration));
+                                surfaceGeneration), restoreBounds.Size,
+                            PassiveHudPaintProbe.IsEligible(mode, _activeMenuPresentationId));
                     }
 
                     var leaseCurrent = OwnsBootstrapPixelProbeLease(
@@ -804,9 +827,9 @@ namespace RageWebUI.Runtime
                         mode,
                         surfaceGeneration,
                         controllerGeneration);
-                    var targetSizeMatches =
-                        evidence.Width == restoreBounds.Width &&
-                        evidence.Height == restoreBounds.Height;
+                    var targetSizeMatches = OverlayPresentationPolicy.CaptureSizeMatchesTarget(
+                        evidence.Width, evidence.Height, restoreBounds.Width,
+                        restoreBounds.Height, captureScale, _webView.RasterizationScale);
                     var concrete = captureCompleted && leaseCurrent &&
                         evidence.IsConcrete &&
                         evidence.PaintIdentityMarkerMatched &&
@@ -819,6 +842,8 @@ namespace RageWebUI.Runtime
                         $"controller_generation={controllerGeneration} attempt={attempt} " +
                         $"identity_current={leaseCurrent} image={evidence.Width}x{evidence.Height} " +
                         $"target={restoreBounds.Width}x{restoreBounds.Height} " +
+                        $"capture_scale={captureScale.ToString("R", CultureInfo.InvariantCulture)} " +
+                        $"current_scale={_webView.RasterizationScale.ToString("R", CultureInfo.InvariantCulture)} " +
                         $"target_size_match={targetSizeMatches} " +
                         $"samples={evidence.SampleCount} opaque={evidence.OpaqueSampleCount} " +
                         $"visible_color={evidence.VisibleColorSampleCount} " +
@@ -830,8 +855,9 @@ namespace RageWebUI.Runtime
                         _bootstrapPaintProofMode = mode;
                         _bootstrapPaintProofSurfaceGeneration = surfaceGeneration;
                         _bootstrapPaintProofControllerGeneration = controllerGeneration;
-                        _bootstrapPaintProofWidth = evidence.Width;
-                        _bootstrapPaintProofHeight = evidence.Height;
+                        _bootstrapPaintProofWidth = restoreBounds.Width;
+                        _bootstrapPaintProofHeight = restoreBounds.Height;
+                        _bootstrapPaintProofRasterizationScale = captureScale;
                         _bootstrapPaintProofCompositionGeneration =
                             _webView.CompositionGeneration;
                         _bootstrapPaintProofConcrete = true;
@@ -1068,13 +1094,9 @@ namespace RageWebUI.Runtime
 
         private void SuspendProviderInputCommit(string reason)
         {
-            _explicitUserIntentInputLeaseGeneration++;
             var previous = _committedProviderInputPresentationId;
             _providerInputCommitGeneration++;
             _committedProviderInputPresentationId = null;
-            Volatile.Write(
-                ref _userIntentAuthorizedProviderPresentationId,
-                null);
             UpdateProviderPointerShield();
             if (!string.IsNullOrWhiteSpace(previous))
             {
@@ -1154,6 +1176,7 @@ namespace RageWebUI.Runtime
             }
             _desktopPresentationPixelsVerified = false;
             TraceTransferState("began-warm-provider", transferIdentity);
+            PublishHostSurfacePresentation(null);
 
             VerifyProviderPresentationPixelsAndCommitAsync(
                 presentationId,
@@ -1201,6 +1224,7 @@ namespace RageWebUI.Runtime
 
                 try
                 {
+                    var captureScale = _webView.RasterizationScale;
                     var capture = _webView.CapturePreviewAsync();
                     var completed = await Task.WhenAny(
                         capture,
@@ -1219,7 +1243,7 @@ namespace RageWebUI.Runtime
                     {
                         var evidence = AnalyzePresentationPixels(
                             await capture,
-                            expectedPaintIdentity);
+                            expectedPaintIdentity, target.Size);
                         var identityCurrent = OwnsProviderPaintCommit(
                             presentationId,
                             controllerGeneration,
@@ -1228,9 +1252,9 @@ namespace RageWebUI.Runtime
                             browserSurfaceHealthGeneration,
                             commitGeneration,
                             target);
-                        var targetSizeMatches =
-                            evidence.Width == target.Width &&
-                            evidence.Height == target.Height;
+                        var targetSizeMatches = OverlayPresentationPolicy.CaptureSizeMatchesTarget(
+                            evidence.Width, evidence.Height, target.Width,
+                            target.Height, captureScale, _webView.RasterizationScale);
                         var exactPaint = identityCurrent &&
                             expectedPaintIdentity != 0 &&
                             evidence.IsConcrete &&
@@ -1244,6 +1268,8 @@ namespace RageWebUI.Runtime
                             $"attempt={attempt} identity_current={identityCurrent} " +
                             $"image={evidence.Width}x{evidence.Height} " +
                             $"target={target.Width}x{target.Height} " +
+                            $"capture_scale={captureScale.ToString("R", CultureInfo.InvariantCulture)} " +
+                            $"current_scale={_webView.RasterizationScale.ToString("R", CultureInfo.InvariantCulture)} " +
                             $"target_size_match={targetSizeMatches} " +
                             $"concrete={evidence.IsConcrete} " +
                             $"paint_identity_marker={evidence.PaintIdentityMarkerMatched} " +
@@ -1393,6 +1419,7 @@ namespace RageWebUI.Runtime
         private void CommitProviderInputAfterRevealFence()
         {
             if (string.IsNullOrWhiteSpace(_activeMenuPresentationId) ||
+                !_desktopPresentationPixelsVerified ||
                 !_transferState.IsInteractive ||
                 !string.Equals(
                     _acceptedMenuPresentationId,
@@ -1554,6 +1581,8 @@ namespace RageWebUI.Runtime
                     var eventName = message.Value<string>("event");
                     if (string.Equals(eventName, "menu.presentation", StringComparison.Ordinal))
                     {
+                        _passiveHudLease.Clear();
+                        PublishHostSurfacePresentation(null);
                         var payload = message["payload"] as JObject;
                         var previousPresentationId = _activeMenuPresentationId;
                         var nextPresentationId =
@@ -1670,6 +1699,16 @@ namespace RageWebUI.Runtime
                         }
                         if (!connected)
                         {
+                            if (_activeHostSurfaceMode == HostSurfaceMode.PassiveHud)
+                            {
+                                _passiveHudLease.Clear();
+                                _desiredVisible = false;
+                                ApplyVisibility(false);
+                                // A reloaded provider starts its counter again.
+                                // Do not mistake its first HUD for a duplicate of
+                                // the disconnected provider's expired surface.
+                                _activeHostSurfaceGeneration = 0;
+                            }
                             _providerInputIntentGate.RevokeProviderSession(
                                 sessionGeneration);
                             if (!hostSurfaceOwnsDisplay)
@@ -1694,6 +1733,18 @@ namespace RageWebUI.Runtime
                             UpdateProviderPointerShield();
                         }
                     }
+                    else if (string.Equals(eventName, PassiveHudContract.EventId, StringComparison.Ordinal))
+                    {
+                        if (!_passiveHudLease.Accept(message["payload"] as JObject,
+                            DateTime.UtcNow, MonotonicMilliseconds()) && !_passiveHudFrameRejectionLogged)
+                        {
+                            _passiveHudFrameRejectionLogged = true;
+                            _trace("webview_passive_hud_frame_rejected",
+                                $"surface={_activeHostSurfaceMode} surface_generation={_activeHostSurfaceGeneration} " +
+                                "reason=invalid-stale-or-inactive-host-lease");
+                        }
+                        ExpirePassiveHud();
+                    }
                     else if (string.Equals(eventName, "host.surface", StringComparison.Ordinal))
                     {
                         var payload = message["payload"] as JObject;
@@ -1710,6 +1761,8 @@ namespace RageWebUI.Runtime
                         _activeHostSurfaceGeneration = nextGeneration;
                         if (surfaceChanged)
                         {
+                            _passiveHudLease.BeginSurface(nextMode, nextGeneration, MonotonicMilliseconds());
+                            _passiveHudFrameRejectionLogged = false;
                             if (HostSurfaceMode.IsInitializing(nextMode) &&
                                 string.Equals(
                                     previousMode,
@@ -2089,6 +2142,9 @@ namespace RageWebUI.Runtime
             catch (Exception error)
             {
                 if (!IsCurrentController(control, generation)) return;
+                _trace("webview_initialization_failed",
+                    $"generation={generation} type={error.GetType().FullName} hresult=0x{error.HResult:X8} " +
+                    $"elapsed_ms={(_initializationTimer?.Elapsed.TotalMilliseconds ?? 0d):F3} message={error.Message}");
                 ResetProviderInputAuthorization("initialization-failed");
                 _browserReady = false;
                 InvalidateBrowserContentReadiness("browser-initialization-failed");
@@ -2105,7 +2161,7 @@ namespace RageWebUI.Runtime
             // ParentWindow and DirectComposition remain rooted in this Reactor
             // HWND for the controller's whole lifetime. GTA is only the outer
             // window owner/z-order anchor and never a WebView2 parent.
-            return new CompositionWebViewHost(this);
+            return new CompositionWebViewHost(this, _trace);
         }
 
         private bool IsCurrentController(CompositionWebViewHost control, int generation)
@@ -2439,6 +2495,7 @@ namespace RageWebUI.Runtime
 
         private void ResetPresentationPaintEvidence()
         {
+            PublishHostSurfacePresentation(null);
             _presentationPaintProbeGeneration++;
             _desktopPaintProbeGeneration++;
             _bootstrapPaintProbeGeneration++;
@@ -2452,6 +2509,7 @@ namespace RageWebUI.Runtime
             _bootstrapPaintProofControllerGeneration = 0;
             _bootstrapPaintProofWidth = 0;
             _bootstrapPaintProofHeight = 0;
+            _bootstrapPaintProofRasterizationScale = double.NaN;
             _bootstrapPaintProofCompositionGeneration = 0;
             _bootstrapPaintProofConcrete = false;
             _bootstrapPaintProofGenerationMarkerMatched = false;
@@ -3023,13 +3081,19 @@ namespace RageWebUI.Runtime
 
         private static BrowserPaintEvidence AnalyzePresentationPixels(
             byte[] png,
-            ulong expectedPaintIdentity)
+            ulong expectedPaintIdentity,
+            Size? targetSize = null,
+            bool passiveHud = false)
         {
             if (png == null || png.Length == 0)
                 return BrowserPaintEvidence.Empty;
 
             using var stream = new MemoryStream(png, writable: false);
             using var bitmap = new Bitmap(stream);
+            // PNG pixels are physical pixels; the extra rounded edge is
+            // clipped by the raw controller bounds, not scaled to fit them.
+            var sampleWidth = targetSize?.Width ?? bitmap.Width;
+            var sampleHeight = targetSize?.Height ?? bitmap.Height;
             // Startup/status surfaces intentionally contain only a compact
             // card and logo. A coarse 32x18 lattice can miss that content and
             // mistake a correctly painted sparse surface for transparency.
@@ -3063,11 +3127,12 @@ namespace RageWebUI.Runtime
                     if (brightest < 48 || color.R + color.G + color.B < 100)
                         continue;
                     visibleColor++;
-                    if (desktop.Count < MaximumDesktopPaintSamples && color.A >= 250)
+                    if (desktop.Count < MaximumDesktopPaintSamples && color.A >= 250 &&
+                        x < sampleWidth && y < sampleHeight)
                     {
                         desktop.Add(new DesktopPaintSample(
-                            (x + 0.5d) / bitmap.Width,
-                            (y + 0.5d) / bitmap.Height,
+                            (x + 0.5d) / sampleWidth,
+                            (y + 0.5d) / sampleHeight,
                             color));
                     }
                 }
@@ -3099,12 +3164,17 @@ namespace RageWebUI.Runtime
                 for (var byteIndex = 0; byteIndex < 8; byteIndex++)
                 {
                     var x = markerX + byteIndex * markerStride;
+                    if (x >= sampleWidth || markerY >= sampleHeight) continue;
                     desktop.Add(new DesktopPaintSample(
-                        (x + 0.5d) / bitmap.Width,
-                        (markerY + 0.5d) / bitmap.Height,
+                        (x + 0.5d) / sampleWidth,
+                        (markerY + 0.5d) / sampleHeight,
                         bitmap.GetPixel(x, markerY)));
                 }
             }
+            var hudContent = passiveHud && expectedPaintIdentity != 0 && paintIdentityMarkerMatched
+                ? PassiveHudPaintProbe.Analyze(bitmap.Width, bitmap.Height,
+                    (x, y) => unchecked((uint)bitmap.GetPixel(x, y).ToArgb()))
+                : default;
             return new BrowserPaintEvidence(
                 bitmap.Width,
                 bitmap.Height,
@@ -3112,7 +3182,9 @@ namespace RageWebUI.Runtime
                 opaque,
                 visibleColor,
                 desktop,
-                paintIdentityMarkerMatched);
+                paintIdentityMarkerMatched,
+                passiveHud,
+                hudContent);
         }
 
         private static bool HasPaintIdentityMarker(
@@ -3339,8 +3411,37 @@ namespace RageWebUI.Runtime
                 "evidence_scope=desktop_presentation completion_wait=False");
         }
 
+        private void PublishHostSurfacePresentation(HostSurfacePresentation? receipt)
+        {
+            if (receipt == null && _verifiedHostSurface == null) return;
+            if (receipt != null && _verifiedHostSurface?.Matches(receipt.Mode, receipt.Generation) == true)
+                return;
+            _verifiedHostSurface = receipt;
+            HostSurfacePresentationChanged?.Invoke(receipt);
+            _trace("webview_host_surface_presentation",
+                $"verified={receipt != null} surface={receipt?.Mode ?? HostSurfaceMode.None} " +
+                $"surface_generation={receipt?.Generation ?? 0}");
+        }
+
+        private void ExpirePassiveHud()
+        {
+            if (IsDisposed || Disposing || _activeHostSurfaceMode != HostSurfaceMode.PassiveHud ||
+                !string.IsNullOrEmpty(_activeMenuPresentationId)) return;
+            var now = MonotonicMilliseconds();
+            if (_passiveHudLease.AllowsPresentation(now)) return;
+            if (!_passiveHudLease.ShouldHide(now) && !_desiredVisible && !Visible && !_revealPending) return;
+            _trace("webview_passive_hud_lease_expired",
+                $"surface_generation={_activeHostSurfaceGeneration} native_visible={Visible} " +
+                $"reveal_pending={_revealPending} action=hide-native-window");
+            _desiredVisible = false;
+            var expiredGeneration = _activeHostSurfaceGeneration;
+            ApplyVisibility(false); // Cancels in-flight proof; late receipts cannot revive it.
+            PassiveHudLeaseExpired?.Invoke(expiredGeneration);
+        }
+
         private void SynchronizeBounds()
         {
+            ExpirePassiveHud();
             RefreshGameWindow();
             var minimized = NativeMethods.IsIconic(_gtaWindow);
             var foreground = IsInteractionForeground();
@@ -3643,6 +3744,7 @@ namespace RageWebUI.Runtime
                 return;
             }
 
+            PublishHostSurfacePresentation(null);
             var wasVisible = _actualVisible;
             var wasPublished = _visibilityPublished;
             var wasPending = _revealPending;
@@ -3677,6 +3779,7 @@ namespace RageWebUI.Runtime
 
         private void ParkForExternalPresentation(string reason)
         {
+            PublishHostSurfacePresentation(null);
             var wasVisible = _actualVisible || Visible;
             var wasPending = _revealPending;
             RevokeFinalRevealOffscreenLease("external-presenter");
@@ -3856,6 +3959,7 @@ namespace RageWebUI.Runtime
             }
             _desktopPresentationPixelsVerified = false;
             TraceTransferState("began", transferIdentity);
+            PublishHostSurfacePresentation(null);
             _trace(
                 "webview_reveal_prepared",
                 $"generation={generation} bounds={_lastBounds.Width}x{_lastBounds.Height} " +
@@ -4202,7 +4306,8 @@ namespace RageWebUI.Runtime
 
             PrepareSurface(target);
             if (HostSurfaceMode.IsInitializing(_activeHostSurfaceMode) &&
-                (!OverlayPresentationPolicy.HasExactBootstrapPixelProof(
+                (_bootstrapPaintProofRasterizationScale != _webView.RasterizationScale ||
+                 !OverlayPresentationPolicy.HasExactBootstrapPixelProof(
                     _activeHostSurfaceMode,
                     _activeHostSurfaceGeneration,
                     _controllerGeneration,
@@ -4475,6 +4580,7 @@ namespace RageWebUI.Runtime
                 }
 
                 await Task.Yield();
+                var captureScale = _webView.RasterizationScale;
                 var capture = _webView.CapturePreviewAsync();
                 var completed = await Task.WhenAny(
                     capture,
@@ -4503,12 +4609,13 @@ namespace RageWebUI.Runtime
                 var capturedPng = await capture;
                 var evidence = AnalyzePresentationPixels(
                     capturedPng,
-                    expectedPaintIdentity);
+                    expectedPaintIdentity, target.Size,
+                    PassiveHudPaintProbe.IsEligible(surfaceMode, presentationId));
                 leaseCurrent = !IsDisposed && !Disposing &&
                     OwnsFinalRevealOffscreenLease(revealGeneration);
-                var targetSizeMatches =
-                    evidence.Width == target.Width &&
-                    evidence.Height == target.Height;
+                var targetSizeMatches = OverlayPresentationPolicy.CaptureSizeMatchesTarget(
+                    evidence.Width, evidence.Height, target.Width,
+                    target.Height, captureScale, _webView.RasterizationScale);
                 var paintIdentityMarkerMatches =
                     expectedPaintIdentity != 0 &&
                     evidence.PaintIdentityMarkerMatched;
@@ -4544,11 +4651,18 @@ namespace RageWebUI.Runtime
                     $"surface={surfaceMode} surface_generation={surfaceGeneration} " +
                     $"identity_current={leaseCurrent} image={evidence.Width}x{evidence.Height} " +
                     $"target={target.Width}x{target.Height} " +
+                    $"capture_scale={captureScale.ToString("R", CultureInfo.InvariantCulture)} " +
+                    $"current_scale={_webView.RasterizationScale.ToString("R", CultureInfo.InvariantCulture)} " +
                     $"target_size_match={targetSizeMatches} " +
                     $"samples={evidence.SampleCount} " +
                     $"opaque={evidence.OpaqueSampleCount} " +
                     $"visible_color={evidence.VisibleColorSampleCount} " +
                     $"expected_paint_identity=0x{expectedPaintIdentity:X16} " +
+                    $"content_scope={(evidence.PassiveHud ? "hud-content" : "whole-frame")} " +
+                    $"content_bounds={evidence.HudContent} " +
+                    $"content_samples={evidence.HudContent.Samples} " +
+                    $"content_opaque={evidence.HudContent.Opaque} " +
+                    $"content_visible={evidence.HudContent.Visible} " +
                     $"paint_identity_marker={paintIdentityMarkerMatches} " +
                     $"root_visual_revision={_webView.RootVisualRevision} " +
                     $"browser_surface_concrete={evidence.IsConcrete} " +
@@ -4837,17 +4951,11 @@ namespace RageWebUI.Runtime
                     {
                         // The pixel-qualified parent is already visible far
                         // off-screen. Move that same HWND directly onto GTA and
-                        // promote it in one native transaction. Do not hide/show
+                        // promote it with bounded native readback/repair. Do not hide/show
                         // or republish the root between CapturePreview proof and
                         // this desktop presentation boundary.
-                        var promoted = NativeMethods.SetWindowPos(
-                            Handle,
-                            NativeMethods.HwndTopMost,
-                            target.Left,
-                            target.Top,
-                            target.Width,
-                            target.Height,
-                            NativeMethods.SwpNoActivate);
+                        var promoted = VerifiedWindowPromotion.Apply(
+                            Handle, target, move: true, trace: _trace);
                         // The retained proof lease was last committed while
                         // this parent lived at its off-screen coordinates.
                         // WebView2 composition controllers do not infer a
@@ -4982,9 +5090,9 @@ namespace RageWebUI.Runtime
             // hosting style, so GDI is not an authoritative readiness witness:
             // Windows deliberately does not allocate a redirected bitmap for
             // this HWND. Publish the already-qualified composition immediately
-            // as passive visibility. The independent probe below may upgrade
-            // this exact transfer to Interactive, but probe failure can never
-            // revoke the painted surface or grant an input lease.
+            // as passive visibility while the bounded independent probe runs.
+            // Only a successful desktop witness may upgrade this exact
+            // transfer to Interactive. Failure hides it without taking input.
             if (!KeepCompositionQualifiedPresentationVisible(
                     transferIdentity,
                     target,
@@ -5002,16 +5110,24 @@ namespace RageWebUI.Runtime
                     $"{transferIdentity.TransferGeneration} reason=" +
                     "desktop-proof-samples-unavailable " +
                     "composition_qualified=True input_enabled=False");
-                TryCompleteExplicitUserIntentReveal(
+                HandleDesktopPresentationFailure(
                     transferIdentity,
-                    completionWaitMilliseconds,
+                    target,
                     "desktop-proof-samples-unavailable");
                 return;
             }
 
             var probeSamples = new List<DesktopPresentationProbeSample>(samples.Count);
+            _trace("webview_desktop_window_state",
+                $"boundary=before-probe generation={transferIdentity.TransferGeneration} " +
+                DesktopWindowState.Capture(Handle, _gtaWindow));
+            var expectedRgb = new List<string>(samples.Count);
+            var samplePoints = new List<string>(samples.Count);
             foreach (var sample in samples)
             {
+                expectedRgb.Add((sample.Expected.ToArgb() & 0xffffff).ToString("X6", CultureInfo.InvariantCulture));
+                samplePoints.Add($"{target.Left + (int)Math.Round(sample.NormalizedX * target.Width - 0.5d)}," +
+                    $"{target.Top + (int)Math.Round(sample.NormalizedY * target.Height - 0.5d)}");
                 probeSamples.Add(new DesktopPresentationProbeSample(
                     sample.NormalizedX,
                     sample.NormalizedY,
@@ -5032,7 +5148,8 @@ namespace RageWebUI.Runtime
                 $"{transferIdentity.TransferGeneration} presentation=" +
                 $"{(transferIdentity.PresentationId.Length == 0 ? "none" : transferIdentity.PresentationId)} " +
                 $"samples={probeSamples.Count} timeout_ms=" +
-                $"{DesktopPresentationProbeTimeoutMilliseconds} input_enabled=False");
+                $"{DesktopPresentationProbeTimeoutMilliseconds} input_enabled=False " +
+                $"sample_points={string.Join(";", samplePoints)} expected_rgb={string.Join(",", expectedRgb)}");
 
             DesktopPresentationProbeResult result;
             try
@@ -5041,7 +5158,9 @@ namespace RageWebUI.Runtime
                     probeExecutable,
                     target,
                     probeSamples,
-                    DesktopPresentationProbeTimeoutMilliseconds);
+                    DesktopPresentationProbeTimeoutMilliseconds,
+                    (stage, detail) => _trace(stage,
+                        $"generation={transferIdentity.TransferGeneration} {detail}"));
             }
             catch (Exception error) when (
                 error is InvalidOperationException ||
@@ -5052,18 +5171,17 @@ namespace RageWebUI.Runtime
                     "webview_desktop_presentation_probe_failed",
                     $"generation={transferIdentity.TransferGeneration} " +
                     $"type={error.GetType().FullName} message={error.Message}");
-                KeepCompositionQualifiedPresentationVisible(
+                HandleDesktopPresentationFailure(
                     transferIdentity,
                     target,
-                    completionWaitMilliseconds,
-                    "desktop-probe-exception");
-                TryCompleteExplicitUserIntentReveal(
-                    transferIdentity,
-                    completionWaitMilliseconds,
                     "desktop-probe-exception");
                 return;
             }
 
+            _trace("webview_desktop_window_state",
+                $"boundary=after-probe generation={transferIdentity.TransferGeneration} " +
+                DesktopWindowState.Capture(IsHandleCreated ? Handle : IntPtr.Zero, _gtaWindow));
+            ExpirePassiveHud();
             if (!_transferState.Matches(transferIdentity) ||
                 _transferState.Phase != OverlayTransferPhase.CompositionCommittedVisible ||
                 !_desiredVisible || !_actualVisible || !Visible)
@@ -5086,19 +5204,18 @@ namespace RageWebUI.Runtime
                 $"readable={result.ReadableSampleCount} matching=" +
                 $"{result.MatchingSampleCount} concrete={result.IsConcrete} " +
                 $"source={result.Source} error={result.Error ?? "none"} " +
-                "evidence_scope=desktop-duplication");
+                $"child_pid={result.ChildPid} elapsed_ms={result.ElapsedMilliseconds} " +
+                $"last_stage={result.LastChildStage} evidence_scope=composited-desktop");
+            _trace("webview_desktop_presentation_pixel_evidence",
+                $"generation={transferIdentity.TransferGeneration} child_pid={result.ChildPid} " +
+                $"source={result.Source} expected_rgb={string.Join(",", expectedRgb)} " +
+                $"observed_rgb={result.ObservedRgb} sample_points={string.Join(";", samplePoints)} " +
+                "evidence_scope=requested-witness-pixels-only");
             if (!result.IsConcrete)
             {
-                KeepCompositionQualifiedPresentationVisible(
+                HandleDesktopPresentationFailure(
                     transferIdentity,
                     target,
-                    completionWaitMilliseconds,
-                    string.IsNullOrWhiteSpace(result.Error)
-                        ? "desktop-pixels-missing"
-                        : "desktop-probe-" + result.Error);
-                TryCompleteExplicitUserIntentReveal(
-                    transferIdentity,
-                    completionWaitMilliseconds,
                     string.IsNullOrWhiteSpace(result.Error)
                         ? "desktop-pixels-missing"
                         : "desktop-probe-" + result.Error);
@@ -5122,6 +5239,9 @@ namespace RageWebUI.Runtime
             }
 
             _desktopPresentationPixelsVerified = true;
+            if (HostSurfaceMode.RequiresPaintProof(_activeHostSurfaceMode))
+                PublishHostSurfacePresentation(new HostSurfacePresentation(
+                    _activeHostSurfaceMode, _activeHostSurfaceGeneration));
             _providerInputIntentGate.TryConsume(
                 transferIdentity.PresentationId,
                 MonotonicMilliseconds(),
@@ -5133,106 +5253,13 @@ namespace RageWebUI.Runtime
                 "desktop-presentation-verified");
         }
 
-        private bool TryCompleteExplicitUserIntentReveal(
-            OverlayTransferIdentity transferIdentity,
-            double completionWaitMilliseconds,
-            string desktopProofFailure)
-        {
-            if (transferIdentity.Owner != OverlayTransferOwner.Provider ||
-                !_transferState.Matches(transferIdentity) ||
-                _transferState.Phase != OverlayTransferPhase.CompositionCommittedVisible ||
-                !_desiredVisible || !_actualVisible || !Visible ||
-                !_providerInputIntentGate.TryConsume(
-                    transferIdentity.PresentationId,
-                    MonotonicMilliseconds(),
-                    out var intentEpoch))
-            {
-                return false;
-            }
-
-            if (!_transferState.TryAdvance(
-                    transferIdentity,
-                    OverlayTransferPhase.CompositionCommittedVisible,
-                    OverlayTransferPhase.ExplicitUserIntentAuthorized) ||
-                !_transferState.TryAdvance(
-                    transferIdentity,
-                    OverlayTransferPhase.ExplicitUserIntentAuthorized,
-                    OverlayTransferPhase.Interactive))
-            {
-                return false;
-            }
-
-            Volatile.Write(
-                ref _userIntentAuthorizedProviderPresentationId,
-                transferIdentity.PresentationId);
-            TraceTransferState("interactive-explicit-f9", transferIdentity);
-            _trace(
-                "webview_provider_input_intent_consumed",
-                $"presentation={transferIdentity.PresentationId} " +
-                $"epoch={intentEpoch} desktop_proof_failure={desktopProofFailure} " +
-                "exact_browser_paint=True composition_commit=True " +
-                "input_enabled=True close_contract=f9-or-escape");
-            CompleteQualifiedReveal(
-                transferIdentity,
-                completionWaitMilliseconds,
-                "explicit-f9-intent");
-            BeginExplicitUserIntentInputLease(transferIdentity);
-            return true;
-        }
-
-        private async void BeginExplicitUserIntentInputLease(
-            OverlayTransferIdentity transferIdentity)
-        {
-            var leaseGeneration = ++_explicitUserIntentInputLeaseGeneration;
-            await Task.Delay(ExplicitUserIntentInputLeaseMilliseconds);
-            if (IsDisposed || Disposing)
-                return;
-            if (InvokeRequired)
-            {
-                BeginInvoke((Action)(() =>
-                    ExpireExplicitUserIntentInputLease(
-                        transferIdentity,
-                        leaseGeneration)));
-                return;
-            }
-            ExpireExplicitUserIntentInputLease(
-                transferIdentity,
-                leaseGeneration);
-        }
-
-        private void ExpireExplicitUserIntentInputLease(
-            OverlayTransferIdentity transferIdentity,
-            int leaseGeneration)
-        {
-            if (leaseGeneration != _explicitUserIntentInputLeaseGeneration ||
-                _desktopPresentationPixelsVerified ||
-                !_transferState.Matches(transferIdentity) ||
-                !_transferState.IsInteractive ||
-                !ProviderPresentationCommitContract.Matches(
-                    Volatile.Read(
-                        ref _userIntentAuthorizedProviderPresentationId),
-                    transferIdentity.PresentationId))
-            {
-                return;
-            }
-
-            _trace(
-                "webview_provider_input_intent_lease_expired",
-                $"presentation={transferIdentity.PresentationId} " +
-                $"lease_ms={ExplicitUserIntentInputLeaseMilliseconds} " +
-                "desktop_witness=False action=fail-closed-hide");
-            _desiredVisible = false;
-            ApplyVisibility(false);
-            PreserveBrowserContentReadinessAfterPresentationFailure(
-                "provider-input-intent-lease-expired");
-        }
-
         private void CompleteQualifiedReveal(
             OverlayTransferIdentity transferIdentity,
             double completionWaitMilliseconds,
             string readinessContract)
         {
             if (!_transferState.Matches(transferIdentity) ||
+                !_desktopPresentationPixelsVerified ||
                 !_transferState.IsInteractive ||
                 !_desiredVisible || !_actualVisible || !Visible)
             {
@@ -5311,11 +5338,12 @@ namespace RageWebUI.Runtime
         /// Desktop capture is not authoritative for an external HWND above an
         /// independent/exclusive-flip swap chain. Once Chromium's exact paint
         /// identity and the DirectComposition/native promotion boundaries have
-        /// passed, keep the ordinary HWND promoted as a bounded best effort.
+        /// passed, keep the ordinary HWND promoted while the bounded probe runs.
         /// It remains explicitly non-interactive and does not publish a provider
         /// presentation commit, preventing an invisible input lease when the
         /// game really is occluding the window. F9/explicit hide can still
-        /// retire the visible attempt without a device-recreation loop.
+        /// retire the attempt; completed proof failure also hides it without
+        /// a device-recreation loop.
         /// </summary>
         private bool KeepCompositionQualifiedPresentationVisible(
             OverlayTransferIdentity transferIdentity,
@@ -5341,6 +5369,7 @@ namespace RageWebUI.Runtime
 
             _desktopPresentationPixelsVerified = false;
             SuspendProviderInputCommit("desktop-presentation-unverified");
+            PublishHostSurfacePresentation(null);
             if (_bootstrapPointerCaptureRequested)
             {
                 _bootstrapPointerCaptureRequested = false;
@@ -5609,7 +5638,8 @@ namespace RageWebUI.Runtime
         private void ApplyOverlayTopMost(bool enabled)
         {
             if (!IsHandleCreated || IsDisposed || Disposing ||
-                _overlayTopMostApplied == enabled)
+                (_overlayTopMostApplied == enabled &&
+                 (!enabled || VerifiedWindowPromotion.IsTopmost(Handle))))
             {
                 return;
             }
@@ -5622,7 +5652,8 @@ namespace RageWebUI.Runtime
                 return;
             }
 
-            var applied = NativeMethods.SetWindowPos(
+            var applied = enabled ? VerifiedWindowPromotion.Apply(
+                Handle, Rectangle.Empty, move: false, trace: _trace) : NativeMethods.SetWindowPos(
                 Handle,
                 enabled ? NativeMethods.HwndTopMost : NativeMethods.HwndNoTopMost,
                 0,
@@ -5648,16 +5679,8 @@ namespace RageWebUI.Runtime
                 return;
             }
 
-            var applied = NativeMethods.SetWindowPos(
-                Handle,
-                NativeMethods.HwndTopMost,
-                0,
-                0,
-                0,
-                0,
-                NativeMethods.SwpNoActivate |
-                NativeMethods.SwpNoMove |
-                NativeMethods.SwpNoSize);
+            var applied = VerifiedWindowPromotion.Apply(
+                Handle, Rectangle.Empty, move: false, trace: _trace);
             if (applied)
             {
                 _overlayTopMostApplied = true;
@@ -5773,7 +5796,9 @@ namespace RageWebUI.Runtime
                 int opaqueSampleCount,
                 int visibleColorSampleCount,
                 IReadOnlyList<DesktopPaintSample> desktopSamples,
-                bool paintIdentityMarkerMatched)
+                bool paintIdentityMarkerMatched,
+                bool passiveHud = false,
+                HudPaintEvidence hudContent = default)
             {
                 Width = width;
                 Height = height;
@@ -5782,6 +5807,8 @@ namespace RageWebUI.Runtime
                 VisibleColorSampleCount = visibleColorSampleCount;
                 DesktopSamples = desktopSamples;
                 PaintIdentityMarkerMatched = paintIdentityMarkerMatched;
+                PassiveHud = passiveHud;
+                HudContent = hudContent;
             }
 
             internal int Width { get; }
@@ -5791,11 +5818,15 @@ namespace RageWebUI.Runtime
             internal int VisibleColorSampleCount { get; }
             internal IReadOnlyList<DesktopPaintSample> DesktopSamples { get; }
             internal bool PaintIdentityMarkerMatched { get; }
+            internal bool PassiveHud { get; }
+            internal HudPaintEvidence HudContent { get; }
             internal bool IsConcrete =>
-                OverlayPresentationPolicy.HasConcreteBrowserPixels(
+                (PassiveHud
+                    ? PaintIdentityMarkerMatched && HudContent.IsConcrete
+                    : OverlayPresentationPolicy.HasConcreteBrowserPixels(
                     SampleCount,
                     OpaqueSampleCount,
-                    VisibleColorSampleCount) &&
+                    VisibleColorSampleCount)) &&
                 DesktopSamples.Count > 0;
         }
 

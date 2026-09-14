@@ -6,6 +6,7 @@
 #include "HookCleanup.h"
 #include "NativeModuleLifetime.h"
 #include "NativeLifecycleLog.h"
+#include "NativeDiagnosticTrace.h"
 #include <d3d11.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -496,6 +497,14 @@ void RenderTargetSwapChain(IDXGISwapChain* swapChain) noexcept {
         const bool visible = localOwner
             ? g_visible.load(std::memory_order_acquire)
             : g_compositor.ExternalPresentationVisible();
+        static std::atomic_int lastDiagnosticMode{-1};
+        static std::atomic_uint64_t lastDiagnosticEpoch{};
+        const int mode = (visible ? 1 : 0) | (localOwner ? 2 : 0);
+        const auto epoch = g_compositor.ExternalPresentationEpoch();
+        const bool modeChanged = lastDiagnosticMode.exchange(mode, std::memory_order_relaxed) != mode;
+        const bool epochChanged = lastDiagnosticEpoch.exchange(epoch, std::memory_order_relaxed) != epoch;
+        if (modeChanged || epochChanged) RecordNativeDiagnostic(
+            "diagnostic_presentation_state", mode, swapChain, epoch);
         if (visible) {
             // Capture mirrors this Present's committed surface, not a prior
             // successful frame. A device/preparation/contention failure must
@@ -503,6 +512,8 @@ void RenderTargetSwapChain(IDXGISwapChain* swapChain) noexcept {
             // the player.
             const bool rendered = g_compositor.Render(
                 swapChain, queue.Get(), false, !localOwner);
+            if (modeChanged || epochChanged) RecordNativeDiagnostic(
+                "diagnostic_transition_draw", rendered ? 1 : 0, swapChain, epoch);
             g_inputQueue.SetCapture(localOwner && rendered);
         } else {
             g_inputQueue.SetCapture(false);
@@ -577,6 +588,9 @@ HRESULT STDMETHODCALLTYPE PresentHook(
     const auto original = originalPresent;
     if (original == nullptr) return DXGI_ERROR_INVALID_CALL;
     const bool outermost = presentHookDepth++ == 0;
+    const bool diagnostic = outermost && !callback.IsTearingDown() &&
+        presentDiagnosticGate.Take(GetTickCount64());
+    if (diagnostic) RecordNativeDiagnostic("diagnostic_present_enter", 0, swapChain, flags);
     bool visibilityProbeDrawn{};
     if (outermost && !callback.IsTearingDown()) {
         if (IsTestPresent(flags)) {
@@ -589,7 +603,10 @@ HRESULT STDMETHODCALLTYPE PresentHook(
             visibilityProbeDrawn = g_compositor.RenderLegacyVisibilityProbe(swapChain);
         }
     }
+    if (diagnostic) RecordNativeDiagnostic("diagnostic_present_forward", 0, swapChain, flags);
     const auto result = original(swapChain, syncInterval, flags);
+    if (diagnostic || (outermost && IsDxgiDeviceFailure(result)))
+        RecordNativeDiagnostic("diagnostic_present_exit", result, swapChain, flags);
     if (visibilityProbeDrawn) g_compositor.RecordLegacyProbePresent(result);
     if (outermost && !DidPresentCommit(result)) {
         g_inputQueue.SetCapture(false);
@@ -611,6 +628,9 @@ HRESULT STDMETHODCALLTYPE Present1Hook(
     const auto original = originalPresent1;
     if (original == nullptr) return DXGI_ERROR_INVALID_CALL;
     const bool outermost = presentHookDepth++ == 0;
+    const bool diagnostic = outermost && !callback.IsTearingDown() &&
+        presentDiagnosticGate.Take(GetTickCount64());
+    if (diagnostic) RecordNativeDiagnostic("diagnostic_present1_enter", 0, swapChain, flags);
     bool visibilityProbeDrawn{};
     if (outermost && !callback.IsTearingDown()) {
         if (IsTestPresent(flags)) {
@@ -621,8 +641,11 @@ HRESULT STDMETHODCALLTYPE Present1Hook(
             visibilityProbeDrawn = g_compositor.RenderLegacyVisibilityProbe(swapChain);
         }
     }
+    if (diagnostic) RecordNativeDiagnostic("diagnostic_present1_forward", 0, swapChain, flags);
     const auto result = original(
         swapChain, syncInterval, flags, parameters);
+    if (diagnostic || (outermost && IsDxgiDeviceFailure(result)))
+        RecordNativeDiagnostic("diagnostic_present1_exit", result, swapChain, flags);
     if (visibilityProbeDrawn) g_compositor.RecordLegacyProbePresent(result);
     if (outermost && !DidPresentCommit(result)) {
         g_inputQueue.SetCapture(false);
@@ -650,11 +673,15 @@ HRESULT STDMETHODCALLTYPE ResizeBuffersHook(
     const bool outermost = resizeHookDepth++ == 0;
     bool compositorRetired = true;
     if (outermost && target) {
+        RecordNativeDiagnostic("diagnostic_resize_enter", 0, swapChain,
+            (static_cast<std::uint64_t>(width) << 32) | height);
         g_inputQueue.SetCapture(false);
         compositorRetired = g_compositor.BeforeResize(swapChain);
     }
+    if (outermost && target) RecordNativeDiagnostic("diagnostic_resize_forward", 0, swapChain);
     const auto result = original(
         swapChain, bufferCount, width, height, format, flags);
+    if (outermost && target) RecordNativeDiagnostic("diagnostic_resize_return", result, swapChain);
     if (outermost && target) {
         g_compositor.AfterResize(swapChain);
         if (!compositorRetired) {
@@ -703,9 +730,12 @@ HRESULT STDMETHODCALLTYPE ResizeBuffers1Hook(
     const bool outermost = resizeHookDepth++ == 0;
     bool compositorRetired = true;
     if (outermost && target) {
+        RecordNativeDiagnostic("diagnostic_resize1_enter", 0, swapChain,
+            (static_cast<std::uint64_t>(width) << 32) | height);
         g_inputQueue.SetCapture(false);
         compositorRetired = g_compositor.BeforeResize(swapChain);
     }
+    if (outermost && target) RecordNativeDiagnostic("diagnostic_resize1_forward", 0, swapChain);
     const auto result = original(
         swapChain,
         bufferCount,
@@ -715,6 +745,7 @@ HRESULT STDMETHODCALLTYPE ResizeBuffers1Hook(
         flags,
         creationNodeMask,
         presentQueues);
+    if (outermost && target) RecordNativeDiagnostic("diagnostic_resize1_return", result, swapChain);
     // The real resize has completed. Lift the worker fence before recording
     // the successful queue refresh because RecordCapturedSwapChain performs
     // the one synchronous preparation of the new buffers.

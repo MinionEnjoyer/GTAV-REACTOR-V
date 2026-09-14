@@ -40,7 +40,7 @@ namespace RageWebUI.Script
             _providerPresentationCommitGate = new ProviderPresentationCommitGate();
         private readonly MenuInputLease _menuInputLease = new MenuInputLease();
         private readonly PassiveHudLease _passiveHud = new PassiveHudLease();
-        private bool _passiveHudVisible;
+        private readonly PassiveHudPresentationGate _passiveHudPresentation = new PassiveHudPresentationGate();
         private long _nextPassiveHudFrame;
         private readonly ManagedPointerButtonPolicy _pointerButtonPolicy =
             new ManagedPointerButtonPolicy();
@@ -65,6 +65,11 @@ namespace RageWebUI.Script
         private int _nextTelemetryAt;
         private int _nextToggleAt;
         private long _nextStoryModePollAt;
+        private bool _firstDiagnosticTickCompleted;
+        private int _readinessDiagnosticPolls;
+        private long _nextReadinessDiagnosticAt;
+        private long _nextDiagnosticHeartbeatAt;
+        private long _nextEscapeDiagnosticAt;
         private long _nextManagedStartupStatusAt;
         private bool _managedStartupStatusComplete;
         private bool _disabledCursorCancelDown;
@@ -94,6 +99,7 @@ namespace RageWebUI.Script
                 "script",
                 "construction_begin",
                 $"domain={AppDomain.CurrentDomain.FriendlyName} " +
+                $"mvid={Assembly.GetExecutingAssembly().ManifestModule.ModuleVersionId} " +
                 $"assembly={Assembly.GetExecutingAssembly().Location}");
 
             try
@@ -192,12 +198,35 @@ namespace RageWebUI.Script
 
         private void OnTick(object sender, EventArgs args)
         {
+            var first = !_firstDiagnosticTickCompleted;
+            if (first) TraceRuntime("diagnostic_first_tick_enter", "candidate=issue-1-dpi-diagnostics-v1");
+            OnTickCore();
+            // Deliberately not a finally: an exception is not a completed tick.
+            if (first)
+            {
+                _firstDiagnosticTickCompleted = true;
+                TraceRuntime("diagnostic_first_tick_exit");
+            }
+            var elapsed = _scriptTimer.ElapsedMilliseconds;
+            if (elapsed >= _nextDiagnosticHeartbeatAt)
+            {
+                _nextDiagnosticHeartbeatAt = elapsed + 5000;
+                TraceRuntime("diagnostic_tick_heartbeat",
+                    $"elapsed_ms={elapsed} story_ready={_storyModeReady} " +
+                    $"playable={_storyModePlayable} browser_ready={_browserReady} " +
+                    $"handoff_attempted={_runtimeReadyHandoffAttempted} readiness_polls={_readinessDiagnosticPolls}");
+            }
+        }
+
+        private void OnTickCore()
+        {
             // Suppression is a per-frame GTA contract. Apply the lease carried
             // from the previous tick before doing any lifecycle or extension
             // work, then apply it again below if this tick acquires ownership.
             SuppressGameInputForActiveLease();
             SynchronizeBrowserContentGeneration();
             var scriptElapsedMilliseconds = _scriptTimer.ElapsedMilliseconds;
+            ExpirePendingProviderInputIntent(scriptElapsedMilliseconds);
             if (scriptElapsedMilliseconds >= _nextStoryModePollAt)
             {
                 UpdateStoryModeReadiness();
@@ -377,6 +406,10 @@ namespace RageWebUI.Script
 
         private void OnKeyDown(object sender, KeyEventArgs args)
         {
+            var inputElapsedMilliseconds = _scriptTimer.ElapsedMilliseconds;
+            // Ticks may pause while GTA's frontend is open. Expire before any
+            // key routing too, so a resumed key cannot inherit an old intent.
+            ExpirePendingProviderInputIntent(inputElapsedMilliseconds);
             var toggleKeyPressed = args.KeyCode == _toggleKey;
             var isPhysicalF9 = toggleKeyPressed && _toggleKey == Keys.F9;
             var hasDefaultF9Owner = isPhysicalF9 &&
@@ -402,7 +435,8 @@ namespace RageWebUI.Script
                 MenuPresentationPolicy.ResolveManagedF9Edge(
                     isPhysicalF9,
                     hasDefaultF9Owner,
-                    defaultOwnerPresentationOrIntentActive);
+                    defaultOwnerPresentationOrIntentActive,
+                    inputLeaseActive: _menuInputLease.SuppressGameInput);
 
             if (managedF9Disposition ==
                 ManagedF9EdgeDisposition.YieldToDefaultOwner)
@@ -410,7 +444,7 @@ namespace RageWebUI.Script
                 TraceRuntime(
                     "toggle_owned_by_default_menu_extension",
                     $"key={_toggleKey} game_time={Game.GameTime} " +
-                    "action=yield-no-mutation");
+                    $"lease={_menuInputLease.State} action=yield-no-mutation");
                 return;
             }
 
@@ -430,17 +464,40 @@ namespace RageWebUI.Script
                 CloseOverlay("toggle");
                 return;
             }
-            if (args.KeyCode == Keys.Escape &&
-                (_pendingProviderInputIntentEpoch > 0 ||
-                 _boundProviderInputIntentEpoch > 0 ||
-                 !string.IsNullOrWhiteSpace(
-                     _userIntentFallbackPresentationId)))
+            if (args.KeyCode == Keys.Escape)
             {
-                CloseOverlay(
-                    "escape-user-intent-fallback",
-                    _userIntentFallbackPresentationId ??
-                        _boundProviderInputIntentPresentationId);
-                return;
+                var escapeDisposition = MenuPresentationPolicy.ResolveProviderIntentEscape(
+                    pendingIntent: _pendingProviderInputIntentEpoch > 0,
+                    boundIntent: _boundProviderInputIntentEpoch > 0,
+                    fallbackPresentation: !string.IsNullOrWhiteSpace(_userIntentFallbackPresentationId),
+                    pendingPresentation: _menuRevealGate.PendingPresentationId != null ||
+                        _providerPresentationCommitGate.PendingPresentationId != null);
+                if (inputElapsedMilliseconds >= _nextEscapeDiagnosticAt)
+                {
+                    _nextEscapeDiagnosticAt = inputElapsedMilliseconds + 250;
+                    TraceRuntime("escape_input_route",
+                        $"route={escapeDisposition} lease={_menuInputLease.State} " +
+                        $"pending_epoch={_pendingProviderInputIntentEpoch} bound_epoch={_boundProviderInputIntentEpoch} " +
+                        $"requested_visible={_overlayRequestedVisible} actual_visible={_overlay.IsVisible} " +
+                        $"input_mode={_inputMode} pause_observed={Game.IsPaused} game_time={Game.GameTime} " +
+                        "evidence=managed-keydown-not-frontend-delivery");
+                }
+                if (escapeDisposition == ProviderIntentEscapeDisposition.ClosePresentation)
+                {
+                    CloseOverlay(
+                        "escape-user-intent-fallback",
+                        _userIntentFallbackPresentationId ??
+                            _boundProviderInputIntentPresentationId);
+                    return;
+                }
+                if (escapeDisposition == ProviderIntentEscapeDisposition.CancelUnboundIntent)
+                {
+                    var epoch = _pendingProviderInputIntentEpoch;
+                    CancelProviderInputIntent();
+                    TraceRuntime("provider_input_intent_cancelled_without_presentation",
+                        $"epoch={epoch} reason=escape no_visibility_mutation=True");
+                    return;
+                }
             }
 
             if (!_storyModeReady)
@@ -478,7 +535,7 @@ namespace RageWebUI.Script
                 _inputMode = MenuPresentationPolicy.InitialInputMode;
                 ShowOverlay("toggle");
             }
-            else if (args.KeyCode == Keys.Escape && _overlay.IsVisible && !_passiveHudVisible)
+            else if (args.KeyCode == Keys.Escape && _overlay.IsVisible && !_passiveHudPresentation.IsRequested)
             {
                 if (!string.IsNullOrWhiteSpace(
                         _userIntentFallbackPresentationId))
@@ -559,20 +616,13 @@ namespace RageWebUI.Script
             string extensionId,
             string presentationId)
         {
+            ExpirePendingProviderInputIntent(_scriptTimer.ElapsedMilliseconds);
             if (_pendingProviderInputIntentEpoch <= 0 ||
-                _scriptTimer.ElapsedMilliseconds >
-                    _pendingProviderInputIntentExpiresAt ||
                 !ReactorHostApi.ExtensionHasCapability(
                     extensionId,
                     ReactorExtensionCapabilities.DefaultF9MenuOwner) ||
                 !(_overlay is IProviderInputIntentRuntime intentRuntime))
             {
-                if (_pendingProviderInputIntentEpoch > 0 &&
-                    _scriptTimer.ElapsedMilliseconds >
-                        _pendingProviderInputIntentExpiresAt)
-                {
-                    CancelProviderInputIntent();
-                }
                 return;
             }
 
@@ -613,6 +663,40 @@ namespace RageWebUI.Script
             _pendingProviderInputIntentExpiresAt = 0;
             _boundProviderInputIntentEpoch = 0;
             _boundProviderInputIntentPresentationId = null;
+        }
+
+        private void RevokeProviderPresentationInputIntent(string? presentationId, string reason)
+        {
+            if (!ProviderPresentationInputCleanup.TryRevoke(
+                    presentationId,
+                    ref _boundProviderInputIntentEpoch,
+                    ref _boundProviderInputIntentPresentationId,
+                    ref _userIntentFallbackPresentationId,
+                    out var revokedEpoch))
+                return;
+
+            // Local state is cleared before notifying the runtime. Cancel is
+            // epoch-specific; it cannot revoke a newer arm/bind across the pipe.
+            if (revokedEpoch > 0 && _overlay is IProviderInputIntentRuntime intentRuntime)
+                intentRuntime.CancelProviderInputIntent(Process.GetCurrentProcess().Id, revokedEpoch);
+            TraceRuntime("provider_presentation_input_revoked",
+                $"presentation={presentationId} epoch={revokedEpoch} reason={reason} " +
+                "pending_intent_preserved=True no_visibility_mutation=True");
+        }
+
+        private void ExpirePendingProviderInputIntent(long elapsedMilliseconds)
+        {
+            if (!MenuPresentationPolicy.ShouldExpirePendingProviderIntent(
+                    _pendingProviderInputIntentEpoch,
+                    _pendingProviderInputIntentExpiresAt,
+                    elapsedMilliseconds))
+                return;
+            var epoch = _pendingProviderInputIntentEpoch;
+            var deadline = _pendingProviderInputIntentExpiresAt;
+            CancelProviderInputIntent();
+            TraceRuntime("provider_input_intent_expired",
+                $"epoch={epoch} deadline_ms={deadline} elapsed_ms={elapsedMilliseconds} " +
+                "no_visibility_mutation=True");
         }
 
         private void CloseOverlay(
@@ -809,19 +893,44 @@ namespace RageWebUI.Script
             TryCompleteRuntimeReadyHandoff();
         }
 
-        private static bool IsPlayableStoryMode()
+        private bool IsPlayableStoryMode()
         {
+            // Capture the first startup polls, then sample at most every five
+            // seconds. Details are emitted BEFORE each engine/SHVDN boundary,
+            // without making extra game/native calls just to format diagnostics.
+            var elapsed = _scriptTimer.ElapsedMilliseconds;
+            var diagnostic = _readinessDiagnosticPolls < 16 || elapsed >= _nextReadinessDiagnosticAt;
+            _readinessDiagnosticPolls++;
+            if (diagnostic) _nextReadinessDiagnosticAt = elapsed + 5000;
+            void Boundary(string step)
+            {
+                if (diagnostic) TraceRuntime("diagnostic_readiness_boundary",
+                    $"poll={_readinessDiagnosticPolls} step={step} elapsed_ms={elapsed}");
+            }
+            bool Complete(bool playable)
+            {
+                Boundary(playable ? "exit-playable" : "exit-not-playable");
+                return playable;
+            }
+            Boundary("enter-is-loading");
             if (Game.IsLoading)
             {
-                return false;
+                return Complete(false);
             }
 
+            Boundary("enter-player-character");
             var character = Game.Player.Character;
-            return character != null
-                && character.Exists()
-                && Function.Call<bool>(Hash.IS_PLAYER_CONTROL_ON, Game.Player.Handle)
-                && Function.Call<bool>(Hash.IS_SCREEN_FADED_IN)
-                && !Function.Call<bool>(Hash.IS_CUTSCENE_ACTIVE);
+            if (character == null) return Complete(false);
+            Boundary("enter-character-exists");
+            if (!character.Exists()) return Complete(false);
+            Boundary("enter-player-handle");
+            var playerHandle = Game.Player.Handle;
+            Boundary("enter-is-player-control-on");
+            if (!Function.Call<bool>(Hash.IS_PLAYER_CONTROL_ON, playerHandle)) return Complete(false);
+            Boundary("enter-is-screen-faded-in");
+            if (!Function.Call<bool>(Hash.IS_SCREEN_FADED_IN)) return Complete(false);
+            Boundary("enter-is-cutscene-active");
+            return Complete(!Function.Call<bool>(Hash.IS_CUTSCENE_ACTIVE));
         }
 
         private MenuInputLeaseFrame UpdateMenuInputLease(
@@ -1379,44 +1488,58 @@ namespace RageWebUI.Script
             if (_overlayRequestedVisible || _menuRevealGate.PendingPresentationId != null ||
                 _providerPresentationCommitGate.PendingPresentationId != null)
             {
-                _passiveHudVisible = false;
+                _passiveHudPresentation.Reset();
                 return;
             }
             bool active = _browserReady && _storyModeReady && _storyModePlayable &&
                 _runtimeReadyHandoffAttempted && !Game.IsPaused && _passiveHud.Active(now) &&
                 _passiveHud.Owner != null && ReactorHostApi.ExtensionHasCapability(
                     _passiveHud.Owner, PassiveHudContract.Capability);
-            if (!active)
+            var surface = CurrentHostSurface;
+            var hostVisible = _overlay.IsVisible;
+            var presentationVerified = (_overlay as IHostSurfacePresentationRuntime)?
+                .IsHostSurfacePresented(HostSurfaceMode.PassiveHud, _hostSurfaceGeneration) == true;
+            var previousState = _passiveHudPresentation.State;
+            var action = _passiveHudPresentation.Update(now, active,
+                surface == HostSurfaceMode.None || surface == HostSurfaceMode.PassiveHud,
+                hostVisible, presentationVerified);
+            if (_passiveHudPresentation.State != previousState)
             {
-                if (_passiveHudVisible)
-                {
-                    _overlay.PostEvent("hud.frame", new JObject { ["schema"] = 1, ["visible"] = false });
-                    if (_overlay is IReasonedVisibilityRuntime passiveVisibility)
-                        passiveVisibility.SetVisible(false, HostVisibilityReason.PresentationPreparation);
-                    else _overlay.SetVisible(false);
-                    _passiveHudVisible = false;
-                }
+                TraceRuntime("passive_hud_presentation_state",
+                    $"previous={previousState} state={_passiveHudPresentation.State} " +
+                    $"action={action} attempt={_passiveHudPresentation.Attempts} " +
+                    $"active={active} host_visible={hostVisible} presentation_verified={presentationVerified} " +
+                    $"surface={surface} surface_generation={_hostSurfaceGeneration} " +
+                    $"script_elapsed_ms={now} input_enabled=False");
+            }
+            if (action == PassiveHudPresentationAction.Hide)
+            {
+                PostPassiveHudFrame(new JObject { ["schema"] = 1, ["visible"] = false });
+                if (_overlay is IReasonedVisibilityRuntime passiveVisibility)
+                    passiveVisibility.SetVisible(false, HostVisibilityReason.PresentationPreparation);
+                else _overlay.SetVisible(false);
                 return;
             }
-            if (!_passiveHudVisible)
+            if (action == PassiveHudPresentationAction.Show)
             {
-                if (CurrentHostSurface != HostSurfaceMode.None && CurrentHostSurface != HostSurfaceMode.PassiveHud)
-                    return;
                 _inputMode = MenuPresentationPolicy.HiddenInputMode;
-                _overlay.PostEvent("hud.frame", _passiveHud.Frame);
                 _overlay.PostEvent("host.surface", new JObject {
                     ["mode"] = HostSurfaceMode.PassiveHud, ["generation"] = NextHostSurfaceGeneration(),
                 });
+                PostPassiveHudFrame(_passiveHud.Frame!);
                 _overlay.SetVisible(true);
-                _passiveHudVisible = true;
                 _nextPassiveHudFrame = now + 100;
             }
-            else if (now >= _nextPassiveHudFrame)
+            else if (_passiveHudPresentation.IsRequested && now >= _nextPassiveHudFrame)
             {
-                _overlay.PostEvent("hud.frame", _passiveHud.Frame);
+                PostPassiveHudFrame(_passiveHud.Frame!);
                 _nextPassiveHudFrame = now + 100;
             }
         }
+
+        private void PostPassiveHudFrame(JObject frame) =>
+            _overlay.PostEvent(PassiveHudContract.EventId,
+                PassiveHudHostLease.CreateFrame(frame, _hostSurfaceGeneration, DateTime.UtcNow));
 
         private void DrainMenuPresentations()
         {
@@ -1492,6 +1615,34 @@ namespace RageWebUI.Script
                         _presentationPreparationDismissalSuppressionId = null;
                     }
                     continue;
+                }
+                // ALLIN1 may observe the physical opening before our managed
+                // KeyDown. Capture that same held-key authority now, before
+                // pending presentation state would make KeyDown yield. The
+                // owner still exclusively handles visibility and close edges.
+                if (MenuPresentationPolicy.ShouldArmDefaultOwnerAtDispatch(
+                        managedF9Ready: _storyModeReady && _toggleKey == Keys.F9 &&
+                            PreloadHandoff.ManagedOwnsF9(Process.GetCurrentProcess().Id),
+                        physicalF9Down: NativeMethods.IsPhysicalF9Down(),
+                        gameForeground: NativeMethods.IsGameForeground(_gtaWindow),
+                        isDefaultOwner: ReactorHostApi.ExtensionHasCapability(
+                            payload.Value<string>("extensionId")!,
+                            ReactorExtensionCapabilities.DefaultF9MenuOwner),
+                        isStartupIntent: isStartupIntent,
+                        hasSupersededPresentation: superseded != null,
+                        presentationOrIntentActive: _overlayRequestedVisible ||
+                            _pendingProviderInputIntentEpoch > 0 ||
+                            _boundProviderInputIntentEpoch > 0 ||
+                            _menuRevealGate.PendingPresentationId != null ||
+                            _providerPresentationCommitGate.PendingPresentationId != null ||
+                            !string.IsNullOrWhiteSpace(_userIntentFallbackPresentationId),
+                        debounceElapsed: Game.GameTime >= _nextToggleAt))
+                {
+                    _nextToggleAt = Game.GameTime + ToggleDebounceMilliseconds;
+                    ArmProviderInputIntent();
+                    TraceRuntime("provider_input_intent_dispatch_edge",
+                        $"presentation={incomingPresentationId} " +
+                        $"intent_epoch={_pendingProviderInputIntentEpoch} source=physical-f9-held");
                 }
                 TryBindProviderInputIntent(
                     payload.Value<string>("extensionId")!,
@@ -1738,6 +1889,7 @@ namespace RageWebUI.Script
             if (presentationId == null)
                 return;
 
+            RevokeProviderPresentationInputIntent(presentationId, reason);
             _providerPresentationCommitGate.Cancel();
             if (string.Equals(
                     _providerRevealAfterCommitPresentationId,
@@ -1773,6 +1925,10 @@ namespace RageWebUI.Script
             }
 
             var exactPresentationId = presentationId!;
+            // Registry removal may precede this failure callback. Revoke only
+            // this ID's input state even if the later registry lookup is stale;
+            // never change visibility/input mode on that stale lookup.
+            RevokeProviderPresentationInputIntent(exactPresentationId, reason);
             if (string.Equals(
                     _menuRevealGate.PendingPresentationId,
                     exactPresentationId,
@@ -1896,11 +2052,14 @@ namespace RageWebUI.Script
             string reason,
             string? expectedPresentationId = null)
         {
+            if (expectedPresentationId != null)
+                RevokeProviderPresentationInputIntent(expectedPresentationId, reason);
             var dismissal = expectedPresentationId == null
                 ? ReactorHostApi.TakeActiveMenuPresentation()
                 : ReactorHostApi.AcknowledgeMenuPresentationHidden(
                     expectedPresentationId);
             if (dismissal == null) return;
+            RevokeProviderPresentationInputIntent(dismissal.Value<string>("presentationId"), reason);
             dismissal["reason"] = reason;
             PostCoreEvent(MenuPresentationPolicy.DismissedEventName, dismissal);
         }

@@ -63,5 +63,25 @@ namespace ReactorV.Core.Tests
             Assert.Equal(expected, DeferredNativeSurfaceIntent.EvaluateRequest(
                 nativeSurface, sessionExists, sessionActive, presentationReady));
         }
+
+        [Fact]
+        public void Windowed_or_harness_callers_bypass_native_deferral_even_without_a_session()
+        {
+            // Production passes nativeSurface=false when the external shadow
+            // is disabled or the WebView presentation harness is selected.
+            Assert.Equal(NativeSurfaceRequestAction.AwaitPaint,
+                DeferredNativeSurfaceIntent.EvaluateRequest(
+                    nativeSurface: false,
+                    externalSessionExists: false,
+                    externalSessionActive: false,
+                    externalPresentationReady: false));
+
+            Assert.Equal(NativeSurfaceRequestAction.DeferUntilNativeReady,
+                DeferredNativeSurfaceIntent.EvaluateRequest(
+                    nativeSurface: true,
+                    externalSessionExists: true,
+                    externalSessionActive: true,
+                    externalPresentationReady: false));
+        }
     }
 }

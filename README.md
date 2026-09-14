@@ -8,19 +8,19 @@ Build React/HTML menus and overlays for **GTA V Story Mode** on **Legacy and Enh
 A shared runtime by **MinionEnjoyer**: each mod keeps ownership of its gameplay,
 settings and saved data. No ALLIN1 Launcher or gameplay client required.
 
-**0.2.4 — unsigned, edition-specific manual-download release.**
+**0.2.5 — unsigned, edition-specific manual-download release.**
 Use the package for your exact supported game version. **Not for GTA Online.**
 See the release notes for validation coverage and known limits.
 
-## What's new in 0.2.4
+## What's new in 0.2.5
 
-- Keeps waiting for a late game graphics adapter instead of permanently failing after ten seconds.
-- Defers native startup-surface paint deadlines until the renderer is ready, with fresh-frame checks preserved.
-- Bounds bootstrap handshakes and hardens retry, shutdown and browser-restart races.
-- Adds startup regressions while retaining 0.2.3's ReShade compatibility fix, consumer UI/settings preservation and executable guards.
+- Consolidates startup, desktop/DPI presentation, passive-HUD ownership, and menu/input work onto one mainline.
+- Retains 0.2.4's late-adapter recovery, bounded bootstrap attachment, and fresh-frame readiness checks.
+- Adds bounded native diagnostic tracing and preserves ALLIN1's generated catalog indexes during updates.
+- Ships a release-matched diagnostic checker with installation identity, dependency probes, and older-release references.
 
-[0.2.4 release notes](https://github.com/MinionEnjoyer/GTAV-REACTOR-V/releases/tag/v0.2.4) ·
-[Startup validation and limits](docs/STARTUP-HARDENING.md) ·
+[0.2.5 release notes](https://github.com/MinionEnjoyer/GTAV-REACTOR-V/releases/tag/v0.2.5) ·
+[Consolidation validation and limits](docs/RELEASE-0.2.5.md) ·
 [ReShade compatibility](docs/DXGI-COMPATIBILITY.md)
 
 ## Downloads
@@ -33,6 +33,11 @@ Downloads are **unsigned**. Verify the matching SHA-256 checksum before installi
 For an existing modded installation, use the separate updater ZIP to preserve
 consumer-owned menus, assets and settings. Game-hook dependencies are not bundled.
 Follow the [installation guide](docs/GETTING-STARTED.md#install) before updating.
+
+The optional diagnostic checker is a separate download. Extract it outside GTA;
+it does not install dependencies, change antivirus settings, or upload reports.
+Use the checker supplied with the release you are testing; newer checkers retain
+older release references. See its bundled README for reference selection and limits.
 
 ## Documentation
 

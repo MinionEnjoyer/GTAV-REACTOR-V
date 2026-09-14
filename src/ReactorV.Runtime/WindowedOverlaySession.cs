@@ -13,6 +13,7 @@ namespace RageWebUI.Runtime
     internal sealed class WindowedOverlaySession :
         IOverlayRuntime,
         IProviderPresentationCommitRuntime,
+        IHostSurfacePresentationRuntime,
         IProviderInputIntentRuntime
     {
         private readonly Thread _uiThread;
@@ -26,6 +27,7 @@ namespace RageWebUI.Runtime
         private int _requestedVisible;
         private int _actualVisible;
         private string? _committedProviderPresentationId;
+        private HostSurfacePresentation? _verifiedHostSurface;
         private string? _userIntentAuthorizedProviderPresentationId;
         private int _disposed;
         private readonly object _cursorSync = new object();
@@ -61,6 +63,8 @@ namespace RageWebUI.Runtime
         }
 
         public bool IsVisible => Volatile.Read(ref _actualVisible) == 1;
+        public bool IsHostSurfacePresented(string mode, int generation) =>
+            IsVisible && Volatile.Read(ref _verifiedHostSurface)?.Matches(mode, generation) == true;
 
         private bool RequestedVisible => Volatile.Read(ref _requestedVisible) == 1;
 
@@ -375,6 +379,8 @@ namespace RageWebUI.Runtime
                             ? presentationId
                             : null);
                 };
+                window.HostSurfacePresentationChanged += receipt =>
+                    Interlocked.Exchange(ref _verifiedHostSurface, receipt);
                 _window = window;
 
                 // Create the HWND and preload WebView2 without asking WinForms

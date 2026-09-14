@@ -7,6 +7,24 @@ namespace RageWebUI.Core.Tests;
 public sealed class PointerDeliverySourceContractTests
 {
     [Fact]
+    public void CrossProcessPassthroughRequiresInitializedLayeredHostOnEveryHandle()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ReactorV.Runtime", "OverlayWindow.cs"));
+        var helper = File.ReadAllText(Path.Combine(root, "src", "ReactorV.Runtime", "LayeredWindowInput.cs"));
+        var handleCreated = MethodRegion(source, "protected override void OnHandleCreated(EventArgs args)",
+            "protected override void OnFormClosing(FormClosingEventArgs args)");
+        Assert.Contains("LayeredWindowInput.Initialize(Handle, _trace);", handleCreated);
+        Assert.Contains("NativeMethods.WsExLayered", source);
+        Assert.Contains("NativeMethods.WsExNoRedirectionBitmap", source);
+        Assert.Contains("SetLayeredWindowAttributes(window, 0, 255, NativeMethods.LwaAlpha)", helper);
+        Assert.Contains("GetLayeredWindowAttributes", helper);
+        Assert.Contains("flags != NativeMethods.LwaAlpha", helper);
+        Assert.DoesNotContain("EnableWindow(", helper);
+        Assert.DoesNotContain("SendInput(", helper);
+    }
+
+    [Fact]
     public void LiveOverlayUsesTypedDomPointerEventsWithoutNativeMouseOrForegroundRepair()
     {
         var source = File.ReadAllText(Path.Combine(

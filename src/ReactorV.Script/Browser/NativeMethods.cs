@@ -96,5 +96,10 @@ namespace RageWebUI.Script.Browser
             pressedSinceLastSample = (state & 0x0001) != 0;
         }
 
+        // Read only the current-down bit; the shared transition bit is not a
+        // reliable source of per-consumer edges.
+        internal static bool IsPhysicalF9Down() =>
+            (GetAsyncKeyState(0x78) & 0x8000) != 0;
+
     }
 }

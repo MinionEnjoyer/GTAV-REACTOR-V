@@ -7,8 +7,8 @@ namespace RageWebUI.Core
     /// into GTA's desktop presentation. Browser paint and a successful
     /// DirectComposition commit are deliberately separate from proof that the
     /// operating-system compositor actually presented the intended pixels.
-    /// A promoted external HWND can remain visible but non-interactive when
-    /// Windows cannot prove it above an independent/exclusive-flip game frame.
+    /// A promoted external HWND remains passive while its bounded witness is
+    /// pending. A failed witness cannot grant input, even after physical F9.
     /// </summary>
     public enum OverlayTransferPhase
     {
@@ -31,6 +31,8 @@ namespace RageWebUI.Core
         PresentationUnverifiedVisible = CompositionCommittedVisible,
         Interactive = 6,
         Failed = 7,
+        // Reserved for old diagnostic receipts. No legal transition enters
+        // this phase: physical intent is not desktop visibility evidence.
         ExplicitUserIntentAuthorized = 8,
     }
 
@@ -280,11 +282,7 @@ namespace RageWebUI.Core
              next == OverlayTransferPhase.CompositionCommittedVisible) ||
             (expected == OverlayTransferPhase.CompositionCommittedVisible &&
              next == OverlayTransferPhase.DesktopPresentationVerified) ||
-            (expected == OverlayTransferPhase.CompositionCommittedVisible &&
-             next == OverlayTransferPhase.ExplicitUserIntentAuthorized) ||
             (expected == OverlayTransferPhase.DesktopPresentationVerified &&
-             next == OverlayTransferPhase.Interactive) ||
-            (expected == OverlayTransferPhase.ExplicitUserIntentAuthorized &&
              next == OverlayTransferPhase.Interactive);
     }
 }
