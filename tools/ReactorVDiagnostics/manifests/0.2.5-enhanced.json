@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "0.2.5",
+  "edition": "Enhanced",
+  "packageSha256": "caafddbfe2eb5158209870c39372f830af58ecbbc94b41aa21c313530d654eb0",
+  "artifact": "ReactorV-0.2.5-enhanced-live-test.zip",
+  "identityAnchors": [
+    {
+      "path": "ReactorV.Bootstrap.asi",
+      "sha256": "a3bf53c34bcf8915f046e609bf9d47080e1926c1c41201c3d35eab1fcbd32a02",
+      "length": 415232
+    },
+    {
+      "path": "ReactorV.RenderHook.asi",
+      "sha256": "2410199af03c03b9fbd9cd4124878f7cf272651512ab98c47944cb12209db7a1",
+      "length": 349184
+    },
+    {
+      "path": "ReactorV.ScriptProbe.asi",
+      "sha256": "a9a8c8d2df3cee0f1c45c28831a11c0c69fce0af92a927bf59934eb32e3cb644",
+      "length": 119808
+    },
+    {
+      "path": "plugins/ReactorV/RageWebUI.Native.dll",
+      "sha256": "123da862a4c281f1a5fcd9ec933e2efb70e5b9a8865413d52ed3c4fb935bef71",
+      "length": 505856
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.Preloader.exe",
+      "sha256": "c683694e74fe0379dd5c6442557340dae8f479c8c531019dc09cef8c15333b7e",
+      "length": 201216
+    },
+    {
+      "path": "scripts/ReactorV/ReactorV.contract.json",
+      "sha256": "d770ab7ca44c3549e86ed9833a34cf5374c09c2be8d3c7df5a9d56eb7c7992aa",
+      "length": 256
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.EnhancedLiveTest.json",
+      "sha256": "95a2b114011afdf6757530216a37dbd781b8ede033e323435a3c52eee83be05f",
+      "length": 332
+    }
+  ],
+  "files": [
+    {
+      "path": "plugins/ReactorV/CefSharp.BrowserSubprocess.Core.dll",
+      "sha256": "d24a77e20d2b5097aea93f2b2b1b7edcdc7f12fcff2f088ff415b56a94f3e41a",
+      "length": 1847296
+    },
+    {
+      "path": "plugins/ReactorV/CefSharp.BrowserSubprocess.exe",
+      "sha256": "fbb9be5d295477cf7678e900042c2899cc1608ecc9c104c4bb10aed109036e9b",
+      "length": 6656
+    },
+    {
+      "path": "plugins/ReactorV/CefSharp.Core.dll",
+      "sha256": "1cd3718a85c03a462d73206fcbe5a743cf1a02bebac342f07bd7578c6439eeb3",
+      "length": 1139712
+    },
+    {
+      "path": "plugins/ReactorV/CefSharp.Core.Runtime.dll",
+      "sha256": "ba7c51ec7627f60e1ba6d007723f41ea7a164c56c2ecb002da1c4751c4bcc129",
+      "length": 1267200
+    },
+    {
+      "path": "plugins/ReactorV/CefSharp.dll",
+      "sha256": "b82468d89879ea3fbe880e75919d313e9440c94fa051541d109a9be4c5e7cc10",
+      "length": 287744
+    },
+    {
+      "path": "plugins/ReactorV/CefSharp.OffScreen.dll",
+      "sha256": "13cb44565e960043e8a75ed36b0302c8fb552e7a7ec9718b03fb9ce44b19d301",
+      "length": 43520
+    },
+    {
+      "path": "plugins/ReactorV/chrome_100_percent.pak",
+      "sha256": "9a9cee828a46b2b3ab96bc6907493fb5ee6cb23da2239ee92ae4d7f18bf4d130",
+      "length": 705714
+    },
+    {
+      "path": "plugins/ReactorV/chrome_200_percent.pak",
+      "sha256": "4500aa1043a4edcd12c2c524ae0ab43f4c482f7280e3a850d94e1aa1860d34e2",
+      "length": 1224671
+    },
+    {
+      "path": "plugins/ReactorV/chrome_elf.dll",
+      "sha256": "2cd3c5e7dbcb1c0f9d8cb47a52e3f0ec1ca46d0e7a066dc693eb1ebcb21960b1",
+      "length": 2799616
+    },
+    {
+      "path": "plugins/ReactorV/d3dcompiler_47.dll",
+      "sha256": "a05f99734f7c4822fefc12b367af21fd0976ed6608752fb1e1e80b6ece7ecbbb",
+      "length": 4741488
+    },
+    {
+      "path": "plugins/ReactorV/dxcompiler.dll",
+      "sha256": "b38c27a078e3479324a63c306610cdd443504ab4a84a876976cd489c38965089",
+      "length": 25753088
+    },
+    {
+      "path": "plugins/ReactorV/dxil.dll",
+      "sha256": "0850398076e9e30cd9ac28fc7d56a7d350ea755b0f3b6b2fc8f35a930888c845",
+      "length": 1502784
+    },
+    {
+      "path": "plugins/ReactorV/icudtl.dat",
+      "sha256": "9f48c7f9c7c94d516a14870707e910ab94d75ae640ff6842c4af53276cd26ebe",
+      "length": 10876560
+    },
+    {
+      "path": "plugins/ReactorV/legal/CefSharp.Common-151.3.170-LICENSE",
+      "sha256": "64271e0f2e6524f2e674ce07ae8e468c2b5be44abd7865ccef40820fe87dc59d",
+      "length": 1664
+    },
+    {
+      "path": "plugins/ReactorV/legal/CefSharp.OffScreen-151.3.170-LICENSE",
+      "sha256": "64271e0f2e6524f2e674ce07ae8e468c2b5be44abd7865ccef40820fe87dc59d",
+      "length": 1664
+    },
+    {
+      "path": "plugins/ReactorV/legal/Chromium-CREDITS.txt",
+      "sha256": "90b641dabcb8160e28d00a6b9a79da8960de03460c771a74ebaa49c5a448e1f8",
+      "length": 19133636
+    },
+    {
+      "path": "plugins/ReactorV/legal/chromiumembeddedframework.runtime.win-x64-151.3.17-LICENSE.txt",
+      "sha256": "2e69c36a7eaa4fa153426eab635c607ea0356cbc7a68a70f42a49e8ab8eb8106",
+      "length": 1691
+    },
+    {
+      "path": "plugins/ReactorV/legal/components.json",
+      "sha256": "39fae1ed3d54247a8b5994f160e6100826029ff0d986e6e8e03c4edc528dfb3f",
+      "length": 3125
+    },
+    {
+      "path": "plugins/ReactorV/legal/LICENSE",
+      "sha256": "0dd9c60c4408b49c81ff269bbe0af9560f7cd39f79b474e5b66e317585e09af5",
+      "length": 1091
+    },
+    {
+      "path": "plugins/ReactorV/legal/Microsoft.Web.WebView2-1.0.4129.50-LICENSE.txt",
+      "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55",
+      "length": 1487
+    },
+    {
+      "path": "plugins/ReactorV/legal/Microsoft.Web.WebView2-1.0.4129.50-NOTICE.txt",
+      "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90",
+      "length": 3894
+    },
+    {
+      "path": "plugins/ReactorV/legal/MinHook-LICENSE.txt",
+      "sha256": "4f21f857550d7be854da6ea5f2da4e6775ca4e3fbb535e4f3d961c47d0bf3335",
+      "length": 4446
+    },
+    {
+      "path": "plugins/ReactorV/legal/Newtonsoft.Json-13.0.4-LICENSE.md",
+      "sha256": "b98a397897ff55f76cddc380041507a95a896b2946e0188703bf0496793d6516",
+      "length": 1104
+    },
+    {
+      "path": "plugins/ReactorV/legal/react-dom-LICENSE.txt",
+      "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "length": 1088
+    },
+    {
+      "path": "plugins/ReactorV/legal/react-LICENSE.txt",
+      "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "length": 1088
+    },
+    {
+      "path": "plugins/ReactorV/legal/scheduler-LICENSE.txt",
+      "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+      "length": 1088
+    },
+    {
+      "path": "plugins/ReactorV/legal/SharpDX-LICENSE.txt",
+      "sha256": "56f0a7ffd27d95389b0f2270785cd57e9b3d8542c8fe355a97860975c70d9c0a",
+      "length": 1089
+    },
+    {
+      "path": "plugins/ReactorV/legal/THIRD_PARTY_NOTICES.md",
+      "sha256": "e1688eb3f2adf3978d77bf77a68dc5431a07c7558c47fae38ace21ae7c6bdebd",
+      "length": 2239
+    },
+    {
+      "path": "plugins/ReactorV/libcef.dll",
+      "sha256": "46f8d94f01fa28b3388e9fc2808503f6dedc3421b563c7791153a2a193008d96",
+      "length": 285378560
+    },
+    {
+      "path": "plugins/ReactorV/libEGL.dll",
+      "sha256": "1e42f574118f4b0910e09f1702156dab6f2dab2dc4fa6c8479080583eed6b708",
+      "length": 461312
+    },
+    {
+      "path": "plugins/ReactorV/libGLESv2.dll",
+      "sha256": "2400a42daa656ee479515e06d5b20e9cb1c5a116e164755b503fd3a5d4a70299",
+      "length": 461312
+    },
+    {
+      "path": "plugins/ReactorV/locales/en-US.pak",
+      "sha256": "0b2a72cc851d62f615080f3954f2c94d7009ccac31ac4248398f08359fd1c714",
+      "length": 595910
+    },
+    {
+      "path": "plugins/ReactorV/locales/en-US_FEMININE.pak",
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "length": 18
+    },
+    {
+      "path": "plugins/ReactorV/locales/en-US_MASCULINE.pak",
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "length": 18
+    },
+    {
+      "path": "plugins/ReactorV/locales/en-US_NEUTER.pak",
+      "sha256": "ca73097bd968b363b7145e86b64f3c595e533808b0763dc8863a27fc363cfa51",
+      "length": 18
+    },
+    {
+      "path": "plugins/ReactorV/Microsoft.Web.WebView2.Core.dll",
+      "sha256": "958efdb7f13a6d1f3079756c96956cc96cf713ae46fa085c8b1e7f44316a4f7e",
+      "length": 698208
+    },
+    {
+      "path": "plugins/ReactorV/Microsoft.Web.WebView2.WinForms.dll",
+      "sha256": "a7b8be525030f19d9e88c6e684bca053dc7a3b080c31c3d9428f7438e7b6768f",
+      "length": 38752
+    },
+    {
+      "path": "plugins/ReactorV/Newtonsoft.Json.dll",
+      "sha256": "f0c07af0e84d4dd4da4bd7823ba4535bc0481b3bf623ed40b659b68147a6bb75",
+      "length": 721320
+    },
+    {
+      "path": "plugins/ReactorV/RageWebUI.Core.dll",
+      "sha256": "0cc9d802dd766e1adcdd3d86d50a4824e3935c80a24a3a82bd5850a1825af1c1",
+      "length": 235008
+    },
+    {
+      "path": "plugins/ReactorV/RageWebUI.DirectX.dll",
+      "sha256": "39ae40599a4fff5b1c75fa1c2023299e105ab352b81d8c04dc0333c3038b6610",
+      "length": 64000
+    },
+    {
+      "path": "plugins/ReactorV/RageWebUI.Native.dll",
+      "sha256": "123da862a4c281f1a5fcd9ec933e2efb70e5b9a8865413d52ed3c4fb935bef71",
+      "length": 505856
+    },
+    {
+      "path": "plugins/ReactorV/RageWebUI.Runtime.dll",
+      "sha256": "2b7ac3d4a941632f1d20ff28a545d2636cd27f8249aea8748b7bb29d10a2c633",
+      "length": 231424
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.EnhancedLiveTest.json",
+      "sha256": "95a2b114011afdf6757530216a37dbd781b8ede033e323435a3c52eee83be05f",
+      "length": 332
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.Preloader.exe",
+      "sha256": "c683694e74fe0379dd5c6442557340dae8f479c8c531019dc09cef8c15333b7e",
+      "length": 201216
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.Preloader.exe.config",
+      "sha256": "051099983b896673909e01a1f631b6652abb88da95c9f06f3efef4be033091fa",
+      "length": 174
+    },
+    {
+      "path": "plugins/ReactorV/ReactorV.Preloader.json",
+      "sha256": "4b964370a07b82586c87a30e60ada7222574d8f20e69e6af05856867321d9b50",
+      "length": 144
+    },
+    {
+      "path": "plugins/ReactorV/resources.pak",
+      "sha256": "e2a142e80b54d0d7849c1f10b1fda305d90f19d08be68d44f01868d9b187b897",
+      "length": 21275766
+    },
+    {
+      "path": "plugins/ReactorV/SharpDX.Direct3D11.dll",
+      "sha256": "56f525e33494f4cd2a560a71cdf237303a3fb54a8fa44e1693eba35c9245c60a",
+      "length": 283136
+    },
+    {
+      "path": "plugins/ReactorV/SharpDX.dll",
+      "sha256": "a0af255ea4b09a8cdb995b8c6fd1075e46f098e23c2351c974e6ded9b8b620cf",
+      "length": 274944
+    },
+    {
+      "path": "plugins/ReactorV/SharpDX.DXGI.dll",
+      "sha256": "bc0243134c93c55ea105d0e9c2a43b6030e973290d0a061cf3a61986a2268a88",
+      "length": 148480
+    },
+    {
+      "path": "plugins/ReactorV/ui/assets/app-BRpBTjFF.css",
+      "sha256": "2876fdc4c5124696bccc3853b86ea29dd71a74d2b0e432071212b22a414cebd2",
+      "length": 25877
+    },
+    {
+      "path": "plugins/ReactorV/ui/assets/app-DAi0rqv9.js",
+      "sha256": "95f1f868c45db4f70e1a8d4ed384cdf3f6420e4f2fbee63acb66eb9f6d95b140",
+      "length": 255040
+    },
+    {
+      "path": "plugins/ReactorV/ui/assets/controller-Om5aIkIy.js",
+      "sha256": "d81a6ca59413d89b8f4efe3f72bacb6841d47d98b1af5265335acbb1deb27f85",
+      "length": 27598
+    },
+    {
+      "path": "plugins/ReactorV/ui/fonts/BebasNeue-Regular.ttf",
+      "sha256": "08e4623805102d819f58601e46e345648846075e363b2ceb23313c2d1c83ec73",
+      "length": 61400
+    },
+    {
+      "path": "plugins/ReactorV/ui/fonts/OFL-Bebas-Neue.txt",
+      "sha256": "a6b230055933f80e5199eb909a67ebb04937a5b4172116d4bfb13a41f30ded38",
+      "length": 4430
+    },
+    {
+      "path": "plugins/ReactorV/ui/fonts/OFL-Oswald.txt",
+      "sha256": "0fd731a904b729a4e02eaf5e8ebd06783edd9abe400e8882760160230675b652",
+      "length": 4483
+    },
+    {
+      "path": "plugins/ReactorV/ui/fonts/Oswald-Variable.ttf",
+      "sha256": "5b38c246e255a12f5712d640d56bcced0472466fc68983d2d0410ec0457c2817",
+      "length": 172088
+    },
+    {
+      "path": "plugins/ReactorV/ui/index.html",
+      "sha256": "e1739974a34958c054ef089fb97327064ca6f030c27d082851e97a0a25f514f1",
+      "length": 535
+    },
+    {
+      "path": "plugins/ReactorV/ui/ragewebui-logo.png",
+      "sha256": "955e8f6900664605358aaf74c0f5e7967493c6a63ef7a4bc705b27314bc8d5c7",
+      "length": 1421249
+    },
+    {
+      "path": "plugins/ReactorV/ui/ragewebui.js",
+      "sha256": "261dafe1a86fb89311d88441a767f01b22cee299a60e006255bd3ca2bb0d6765",
+      "length": 328
+    },
+    {
+      "path": "plugins/ReactorV/ui/reactor-ui.json",
+      "sha256": "61ac483258c837bd213abe8314b1da91d6646ef689d5eb45d5d5c7e6c58a96fd",
+      "length": 1462
+    },
+    {
+      "path": "plugins/ReactorV/v8_context_snapshot.bin",
+      "sha256": "4aa06b1a739760bbbf3d246c07c69315ae4ae90c681beb4d7334c92271666208",
+      "length": 740440
+    },
+    {
+      "path": "plugins/ReactorV/vk_swiftshader.dll",
+      "sha256": "6cb629a0485c6421de537c3b346f51157d3004915d97e199e0762c9a79ac412a",
+      "length": 5447168
+    },
+    {
+      "path": "plugins/ReactorV/vk_swiftshader_icd.json",
+      "sha256": "32d83ff113fef532a9f97e0d2831f8656628ab1c99e9060f0332b1532839afd9",
+      "length": 106
+    },
+    {
+      "path": "plugins/ReactorV/vulkan-1.dll",
+      "sha256": "e59cb82dfd94b185bd0a5389e04a2e86eed56371f1457cf971a763fd910cf180",
+      "length": 967168
+    },
+    {
+      "path": "plugins/ReactorV/WebView2Loader.dll",
+      "sha256": "a9a09232c25805323d4cfb3fc8f545a190a9c8a99c93262ea99d0b88df99ec90",
+      "length": 164704
+    },
+    {
+      "path": "ReactorV.Bootstrap.asi",
+      "sha256": "a3bf53c34bcf8915f046e609bf9d47080e1926c1c41201c3d35eab1fcbd32a02",
+      "length": 415232
+    },
+    {
+      "path": "ReactorV.RenderHook.asi",
+      "sha256": "2410199af03c03b9fbd9cd4124878f7cf272651512ab98c47944cb12209db7a1",
+      "length": 349184
+    },
+    {
+      "path": "ReactorV.ScriptProbe.asi",
+      "sha256": "a9a8c8d2df3cee0f1c45c28831a11c0c69fce0af92a927bf59934eb32e3cb644",
+      "length": 119808
+    },
+    {
+      "path": "scripts/ReactorV/Newtonsoft.Json.dll",
+      "sha256": "f0c07af0e84d4dd4da4bd7823ba4535bc0481b3bf623ed40b659b68147a6bb75",
+      "length": 721320
+    },
+    {
+      "path": "scripts/ReactorV/RageWebUI.Core.dll",
+      "sha256": "0cc9d802dd766e1adcdd3d86d50a4824e3935c80a24a3a82bd5850a1825af1c1",
+      "length": 235008
+    },
+    {
+      "path": "scripts/ReactorV/RageWebUI.Script.dll",
+      "sha256": "8a0b4c47872ddb26f4dc0dec3c7e761a858a87911be2e1fb997a1dc6e1b903b3",
+      "length": 101888
+    },
+    {
+      "path": "scripts/ReactorV/ReactorV.contract.json",
+      "sha256": "d770ab7ca44c3549e86ed9833a34cf5374c09c2be8d3c7df5a9d56eb7c7992aa",
+      "length": 256
+    },
+    {
+      "path": "scripts/ReactorV/ReactorV.json",
+      "sha256": "767d74036b269296b1ca40e7fcc1bc2dd40479dcc8cc6ff52065828e766a12d3",
+      "length": 204
+    }
+  ]
+}
