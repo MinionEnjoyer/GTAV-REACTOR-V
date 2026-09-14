@@ -11,7 +11,10 @@
     <Version>0.2.5</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Deterministic>true</Deterministic>
-    <DebugType>portable</DebugType>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))=/_/</PathMap>
     <DefaultItemExcludes>$(DefaultItemExcludes);tests\**;Tests\**;fixtures\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
