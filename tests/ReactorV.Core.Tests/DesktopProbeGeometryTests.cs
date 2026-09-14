@@ -51,6 +51,20 @@ public sealed class DesktopProbeGeometryTests
     }
 
     [Fact]
+    public void ProductionMarkerWitnessStaysAnEightCellStripAt1440p()
+    {
+        var target = new Rectangle(0, 0, 3440, 1440);
+        var points = Enumerable.Range(0, 8).Select(i => DesktopProbeGeometry.SamplePoint(
+            target, (420 + i * 4 + .5d) / target.Width, (96 + .5d) / target.Height)).ToArray();
+        var crop = DesktopProbeGeometry.CaptureBounds(target, points);
+        Assert.Equal(8, points.Length);
+        Assert.Equal(29, crop.Width);
+        Assert.Equal(1, crop.Height);
+        Assert.True((long)crop.Width * crop.Height <
+            (long)target.Width * target.Height / 10000);
+    }
+
+    [Fact]
     public void EdgesDuplicatesAndSinglePixelRemainReadable()
     {
         var target = new Rectangle(-10, -20, 10, 20);
