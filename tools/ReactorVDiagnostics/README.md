@@ -1,4 +1,4 @@
-# Reactor V Diagnostics 0.1.0
+# Reactor V Diagnostics
 
 A portable, local-only diagnostic for GTA V Story Mode and bundled Reactor V
 release references. It automatically selects a release only when every bounded

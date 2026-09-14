@@ -27,11 +27,27 @@ if ($references.Count -ne 2 -or $releaseEditions -ne 'Enhanced,Legacy') {
 }
 $package = Join-Path $output "ReactorV-Diagnostics-$ReleaseVersion"
 New-Item -ItemType Directory -Path $package | Out-Null
+function Test-ByteSequence([byte[]]$Bytes, [byte[]]$Needle) {
+    if ($Needle.Length -eq 0 -or $Needle.Length -gt $Bytes.Length) { return $false }
+    for ($offset = 0; $offset -le $Bytes.Length - $Needle.Length; $offset++) {
+        if ($Bytes[$offset] -ne $Needle[0]) { continue }
+        $matches = $true
+        for ($index = 1; $index -lt $Needle.Length; $index++) { if ($Bytes[$offset + $index] -ne $Needle[$index]) { $matches = $false; break } }
+        if ($matches) { return $true }
+    }
+    return $false
+}
 $binaryRoot = Join-Path $PSScriptRoot 'bin\Release\net48'
 foreach ($name in @('ReactorV.Diagnostics.exe','ReactorV.Diagnostics.exe.config','Newtonsoft.Json.dll')) {
     $source = Join-Path $binaryRoot $name
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing package input: $name" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $package $name)
+}
+$checkerExe = Join-Path $package 'ReactorV.Diagnostics.exe'
+$developerPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+$checkerBytes = [IO.File]::ReadAllBytes($checkerExe)
+foreach ($encoding in @([Text.Encoding]::UTF8, [Text.Encoding]::Unicode)) {
+    if (Test-ByteSequence $checkerBytes ($encoding.GetBytes($developerPath))) { throw 'Packaged diagnostics EXE contains the local developer profile path.' }
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'manifests') -Destination (Join-Path $package 'manifests') -Recurse
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Destination (Join-Path $package 'READ-ME-FIRST.md')
