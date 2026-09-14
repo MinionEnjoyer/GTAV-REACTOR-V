@@ -80,6 +80,7 @@ namespace ReactorV.Diagnostics
                     case "--game": result.GameDirectory = value; break;
                     case "--output": result.OutputDirectory = value; break;
                     case "--edition": result.Edition = value; break;
+                    case "--release": result.ReleaseVersion = value; break;
                     case "--manifest": result.ManifestPath = value; break;
                     case "--wait": result.WaitSeconds = int.Parse(value); break;
                     case "--seconds": result.RecordSeconds = int.Parse(value); break;
@@ -89,21 +90,21 @@ namespace ReactorV.Diagnostics
                     default: throw new ArgumentException("Unknown option: " + key);
                 }
             }
+            if (!string.IsNullOrWhiteSpace(result.ManifestPath) &&
+                !string.Equals(result.ReleaseVersion, "auto", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Use either --release or --manifest, not both.");
             result.Validate();
-            if (string.IsNullOrWhiteSpace(result.ManifestPath)) result.ManifestPath = DefaultManifest(result.Edition);
             return result;
         }
 
-        internal static string DefaultManifest(string edition) => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "manifests", "0.2.4-" + edition.ToLowerInvariant() + ".json");
-
-        internal const string Help = @"Reactor V Diagnostics 0.1.0 (local-only; reference release 0.2.4)
+        internal static string Help => @"Reactor V Diagnostics " + DiagnosticRunner.ToolVersion + @" (local-only; bundled release references)
 Double-click for the graphical interface, or:
   ReactorV.Diagnostics.exe check --game ""D:\Games\GTA Enhanced""
   ReactorV.Diagnostics.exe record --game ""D:\Games\GTA Enhanced"" --wait 120 --seconds 180
   ReactorV.Diagnostics.exe isolate-preview --game ""D:\Games\GTA Enhanced""
   ReactorV.Diagnostics.exe isolate --game ""D:\Games\GTA Enhanced"" --consent
   ReactorV.Diagnostics.exe restore --game ""D:\Games\GTA Enhanced"" --state ""<original run>\isolation-state.json"" --consent
-Options: --edition Enhanced|Legacy; --output <outside-game directory>; --manifest <reference JSON>
+Options: --edition Enhanced|Legacy; --output <outside-game directory>; --release auto|<bundled version>; --manifest <bundled reference JSON>
          --security-events (related events only); --wait 1..600; --seconds 1..900
          --dump none|mini|full --procdump <Microsoft procdump64.exe> --consent
 Capture never launches GTA. Close it, arm capture, then start Story Mode yourself.

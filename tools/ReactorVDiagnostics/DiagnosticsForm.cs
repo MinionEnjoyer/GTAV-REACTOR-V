@@ -12,6 +12,7 @@ namespace ReactorV.Diagnostics
         private readonly TextBox game = new TextBox { Dock = DockStyle.Fill };
         private readonly TextBox output = new TextBox { Dock = DockStyle.Fill };
         private readonly ComboBox edition = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+        private readonly ComboBox reference = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
         private readonly NumericUpDown wait = new NumericUpDown { Minimum = 1, Maximum = 600, Value = 120, Width = 90 };
         private readonly NumericUpDown duration = new NumericUpDown { Minimum = 1, Maximum = 900, Value = 180, Width = 90 };
         private readonly CheckBox security = new CheckBox { AutoSize = true, Text = "Include related Windows security events (may be unavailable without elevation)" };
@@ -27,7 +28,7 @@ namespace ReactorV.Diagnostics
 
         public DiagnosticsForm()
         {
-            Text = "Reactor V Diagnostics · 0.1.0";
+            Text = "Reactor V Diagnostics · " + DiagnosticRunner.ToolVersion;
             StartPosition = FormStartPosition.CenterScreen;
             Size = new Size(1040, 800);
             MinimumSize = new Size(860, 680);
@@ -35,6 +36,8 @@ namespace ReactorV.Diagnostics
             AutoScaleMode = AutoScaleMode.Dpi;
             output.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ReactorV-Diagnostics");
             edition.Items.AddRange(new object[] { "Enhanced", "Legacy" }); edition.SelectedIndex = 0;
+            RefreshReleaseReferences();
+            edition.SelectedIndexChanged += (_, __) => RefreshReleaseReferences();
             dump.Items.AddRange(new object[] { "none", "mini", "full" }); dump.SelectedIndex = 0;
 
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(18), ColumnCount = 1, RowCount = 8 };
@@ -53,7 +56,7 @@ namespace ReactorV.Diagnostics
             // Keep the table's minimum preferred width below the supported
             // 860px form width; a fixed 960px label made the right settings
             // column (including Browse) render off-screen.
-            layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(780, 0), Text = "Local-only · Release reference 0.2.4 · No uploads, automatic repairs or security changes. Dependency loads run in a separate helper. Use Story Mode only.", Margin = new Padding(0, 0, 0, 12) });
+            layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(780, 0), Text = "Local-only · automatically selects an exact bundled release reference, or reports build drift · No uploads, automatic repairs or security changes. Dependency loads run in a separate helper. Use Story Mode only.", Margin = new Padding(0, 0, 0, 12) });
 
             var settings = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, RowCount = 5 };
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); settings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
@@ -63,6 +66,7 @@ namespace ReactorV.Diagnostics
             settings.Controls.Add(new Label { Text = "Edition", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
             var timings = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true };
             timings.Controls.Add(edition); timings.Controls.Add(new Label { Text = "Wait (sec)", AutoSize = true, Padding = new Padding(8, 6, 0, 0) }); timings.Controls.Add(wait);
+            timings.Controls.Add(new Label { Text = "Reference", AutoSize = true, Padding = new Padding(8, 6, 0, 0) }); timings.Controls.Add(reference);
             timings.Controls.Add(new Label { Text = "Record (sec)", AutoSize = true, Padding = new Padding(8, 6, 0, 0) }); timings.Controls.Add(duration);
             settings.Controls.Add(timings, 1, 2); settings.SetColumnSpan(timings, 2);
             settings.Controls.Add(new Label { Text = "Crash dump", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
@@ -118,7 +122,7 @@ namespace ReactorV.Diagnostics
             if (running != null) return;
             var options = new DiagnosticOptions {
                 GameDirectory = game.Text, OutputDirectory = output.Text, Edition = edition.Text,
-                ManifestPath = Program.DefaultManifest(edition.Text), IncludeSecurityEvents = security.Checked,
+                ReleaseVersion = reference.Text, IncludeSecurityEvents = security.Checked,
                 WaitSeconds = (int)wait.Value, RecordSeconds = (int)duration.Value,
                 DumpMode = mode == "record" ? dump.Text : "none", ProcDumpPath = procDump.Text
             };
@@ -155,6 +159,15 @@ namespace ReactorV.Diagnostics
             }
             catch (Exception error) { log.AppendText(error.Message + Environment.NewLine); status.Text = "Stopped: " + error.Message; }
             finally { running = null; cancellation.Dispose(); actions.Enabled = true; stop.Enabled = false; open.Enabled = lastOutput != null; }
+        }
+
+        private void RefreshReleaseReferences()
+        {
+            var prior = reference.Text;
+            reference.Items.Clear(); reference.Items.Add("auto");
+            try { reference.Items.AddRange(ReleaseReferenceService.BundledReleaseVersions(edition.Text)); }
+            catch { /* Run will report a missing/corrupt bundled index. */ }
+            reference.SelectedItem = reference.Items.Contains(prior) ? prior : "auto";
         }
     }
 }

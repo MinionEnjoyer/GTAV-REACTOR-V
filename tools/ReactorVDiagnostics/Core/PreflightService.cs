@@ -29,6 +29,23 @@ namespace ReactorV.Diagnostics
             var gameRoot = DiagnosticIO.GameRoot(options);
             DiagnosticIO.RequireOrdinaryPath(gameRoot);
             var manifestPath = options.ManifestPath;
+            if (string.IsNullOrWhiteSpace(manifestPath))
+            {
+                var observationsOnly = new JArray();
+                var unknownOnly = new JArray();
+                progress("No exact installed release reference was selected; recording bounded observations only.");
+                CollectRootObservations(gameRoot, observationsOnly, unknownOnly, token);
+                CollectRuntimeDependencyObservations(gameRoot, observationsOnly, unknownOnly, token);
+                var noReference = new JObject {
+                    ["schemaVersion"] = 1, ["kind"] = "reactor-install-preflight", ["generatedUtc"] = DateTime.UtcNow.ToString("o"),
+                    ["referenceStatus"] = "unrecognized-or-build-drift", ["confirmed"] = new JArray(), ["missing"] = new JArray(), ["mismatch"] = new JArray(),
+                    ["observations"] = observationsOnly, ["unknown"] = unknownOnly,
+                    ["limitations"] = new JArray("No pinned release was selected automatically. Observations are not an integrity pass or compatibility result.")
+                };
+                DiagnosticIO.RequireOrdinaryPath(options.OutputDirectory);
+                DiagnosticIO.AtomicWriteJson(DiagnosticIO.SafePath(options.OutputDirectory, "ReactorV-preflight.json"), noReference);
+                return noReference;
+            }
             DiagnosticIO.RequireOrdinaryPath(manifestPath);
             progress("Reading the selected release manifest.");
             var manifest = ReadManifest(manifestPath);

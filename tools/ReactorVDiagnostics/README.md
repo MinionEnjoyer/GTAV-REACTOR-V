@@ -1,6 +1,9 @@
 # Reactor V Diagnostics 0.1.0
 
-A portable, local-only diagnostic for GTA V Story Mode and Reactor V **0.2.4**.
+A portable, local-only diagnostic for GTA V Story Mode and bundled Reactor V
+release references. It automatically selects a release only when every bounded
+identity anchor matches; otherwise it reports unrecognized/build-drift rather
+than treating an arbitrary DLL version as a pass.
 It collects evidence; it does not automatically diagnose a corrupted execution
 pointer, repair your game, install dependencies, disable antivirus, or upload files.
 
@@ -19,7 +22,8 @@ Mode for you. Close GTA and any launcher doing installation/repair before isolat
 ## Recommended order
 
 1. **Check + dependencies**. Compares installed Reactor package files with hashes
-   generated from the exact published 0.2.4 edition ZIP. A modified JSON/config
+   generated from the exact bundled edition ZIP. Select a specific bundled
+   release when comparing an intentionally drifted installation. A modified JSON/config
    file may be intentional. Contextual ASI/graphics-proxy files are observations,
    not assertions of conflict. Required native-library load tests run in a
    time-limited helper, not inside GTA or the collector.
@@ -119,9 +123,23 @@ builds the synthetic process fixture, runs the linked-source .NET 8 regression
 suite, and creates a ZIP plus SHA256 manifest. Requires the .NET 8 SDK on the
 developer machine only. Fixtures and test binaries are never packaged.
 
-`build-manifests.py` regenerates reference JSON from the two public 0.2.4 ZIPs,
-first checking their pinned SHA256 hashes. It never reads a local modified game
-as the release reference. No runtime/release binary or installer is changed.
+`prepare-release-diagnostics.ps1` is the mandatory per-release gate. It takes
+the final Enhanced and Legacy ZIPs plus their explicit SHA-256 sidecars, rejects
+wrong names, hashes, unsafe entries and unscoped payloads, then generates the
+new release references and builds/tests the checker package. It retains older
+references in `manifests/release-index.json`; it never reads a local modified
+game as a release reference. Use a developer Python 3 executable explicitly if
+`python` is not on PATH:
+
+```powershell
+.\tools\prepare-release-diagnostics.ps1 -ReleaseVersion 0.2.5 `
+  -EnhancedArchive <final-enhanced.zip> -EnhancedSidecar <final-enhanced.zip.sha256> `
+  -LegacyArchive <final-legacy.zip> -LegacySidecar <final-legacy.zip.sha256> `
+  -PythonPath <python.exe> -OutputDirectory <fresh-output-directory>
+```
+
+Publish the resulting `ReactorV-Diagnostics-<release>.zip` and its sidecar with
+the matching runtime release. No runtime/release binary or installer is changed.
 
 References: [Microsoft ProcDump](https://learn.microsoft.com/en-us/sysinternals/downloads/procdump),
 [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution),

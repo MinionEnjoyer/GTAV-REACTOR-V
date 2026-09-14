@@ -8,7 +8,7 @@
     <Prefer32Bit>false</Prefer32Bit>
     <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>0.1.0</Version>
+    <Version>0.2.5</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>

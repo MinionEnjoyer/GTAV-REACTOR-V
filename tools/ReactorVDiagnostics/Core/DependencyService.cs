@@ -67,6 +67,12 @@ namespace ReactorV.Diagnostics
 
         public static JObject RunProbe(DiagnosticOptions options)
         {
+            // This private child mode can be invoked directly, so re-resolve here:
+            // command-line callers must not turn it into an arbitrary-DLL loader
+            // by supplying their own manifest.
+            var reference = ReleaseReferenceService.Resolve(options);
+            if (!string.Equals((string)reference["status"], "manual-pinned", StringComparison.Ordinal))
+                throw new InvalidDataException("Dependency probe requires a bundled pinned release reference.");
             Stage("probe:static-start");
             var report = BuildStatic(options);
             if (!(bool?)report["releaseFilesVerified"] ?? false) { Stage("probe:refused-unverified"); report["execution"] = "refused-unverified-release-files"; return report; }

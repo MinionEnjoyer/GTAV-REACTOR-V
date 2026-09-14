@@ -10,6 +10,7 @@ namespace ReactorV.Diagnostics
 {
     public static class DiagnosticRunner
     {
+        public static string ToolVersion => typeof(DiagnosticRunner).Assembly.GetName().Version?.ToString() ?? "unknown";
         public static JObject Run(string mode, DiagnosticOptions options, CancellationToken token, Action<string> progress)
         {
             if (mode != "check" && mode != "record" && mode != "isolate-preview" && mode != "isolate" && mode != "restore")
@@ -24,21 +25,28 @@ namespace ReactorV.Diagnostics
                 options.IsolationStatePath = Path.Combine(options.OutputDirectory, "isolation-state.json");
             }
             var report = new JObject {
-                ["schemaVersion"] = 1, ["toolVersion"] = "0.1.0", ["operation"] = mode,
+                ["schemaVersion"] = 1, ["toolVersion"] = ToolVersion, ["operation"] = mode,
                 ["startedUtc"] = DateTime.UtcNow.ToString("o"), ["edition"] = options.Edition,
                 ["meaning"] = "Collection completion is not proof of a healthy game or the cause of a crash.",
                 ["privacy"] = "Paths are redacted on a best-effort basis. Review all files before sharing. Dumps and restoration files are excluded from the review ZIP."
             };
             try
             {
+                if (mode != "restore") report["referenceSelection"] = ReleaseReferenceService.Resolve(options);
                 if (mode == "check" || mode == "record")
                 {
                     report["preflight"] = PreflightService.Run(options, token, progress);
                     token.ThrowIfCancellationRequested();
+                    // This inventory reads only third-party metadata and remains useful
+                    // when no exact Reactor release can be selected.
                     report["hostDependencies"] = HostDependencyService.Run(options, token, progress);
                     token.ThrowIfCancellationRequested();
-                    report["dependencies"] = DependencyService.Run(options, token, progress);
-                    token.ThrowIfCancellationRequested();
+                    if (!string.IsNullOrWhiteSpace(options.ManifestPath))
+                    {
+                        report["dependencies"] = DependencyService.Run(options, token, progress);
+                        token.ThrowIfCancellationRequested();
+                    }
+                    else report["dependencies"] = new JObject { ["execution"] = "not-run-unrecognized-or-build-drift", ["releaseFilesVerified"] = false };
                 }
                 if (mode == "record")
                 {
@@ -69,10 +77,12 @@ namespace ReactorV.Diagnostics
         public static string Summary(JObject report)
         {
             var text = new StringBuilder();
-            text.AppendLine("REACTOR V DIAGNOSTICS 0.1.0");
+            text.AppendLine("REACTOR V DIAGNOSTICS " + ToolVersion);
             text.AppendLine("Operation: " + report["operation"] + " | Status: " + report["status"]);
             text.AppendLine("Collection completion DOES NOT mean the game is healthy or a cause is established.");
             if (report["error"] != null) text.AppendLine("STOP: " + report["error"]);
+            var selection = report["referenceSelection"];
+            if (selection != null) text.AppendLine("Release reference selection: " + Display(selection["status"]));
             var check = report["preflight"];
             if (check != null)
             {
