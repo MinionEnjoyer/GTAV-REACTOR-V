@@ -12,7 +12,7 @@ settings and saved data. No ALLIN1 Launcher or gameplay client required.
 Use the package for your exact supported game version. **Not for GTA Online.**
 See the release notes for validation coverage and known limits.
 
-Got feedback, or need help? Come chat in our community Discord!
+Got feedback, or need help?  Come chat in our community [Discord](https://discord.gg/hs7c2XfdD)!
 
 ## What's new in 0.2.5
 
