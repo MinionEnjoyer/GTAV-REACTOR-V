@@ -24,8 +24,18 @@ $editionProfile = if ($Edition -eq 'Enhanced') {
         ArtifactKind = 'enhanced-live-test'
         ArchivePattern = 'ReactorV-*-enhanced-live-test.zip'
         GameExecutable = 'GTA5_Enhanced.exe'
-        GameVersion = '1.0.1158.13'
-        GameSha256 = '0C52864D4521D9C9D441348AA1156958792DDE8825D0297C851753F167336401'
+        GameBuilds = @(
+            [ordered]@{
+                Id = 'enhanced-steam-tu-1.73-1158.16'
+                GameVersion = '1.0.1158.16'
+                GameSha256 = '69DA07FF67D05E9DED11289E597E8B8DC5855B0A429C085F37D148DC267CB2C5'
+            },
+            [ordered]@{
+                Id = 'enhanced-steam-1158.13'
+                GameVersion = '1.0.1158.13'
+                GameSha256 = '0C52864D4521D9C9D441348AA1156958792DDE8825D0297C851753F167336401'
+            }
+        )
         Marker = 'plugins/ReactorV/ReactorV.EnhancedLiveTest.json'
         OtherMarker = 'plugins/ReactorV/ReactorV.LegacyLiveTest.json'
     }
@@ -34,16 +44,19 @@ $editionProfile = if ($Edition -eq 'Enhanced') {
         ArtifactKind = 'legacy-live-test'
         ArchivePattern = 'ReactorV-*-legacy-live-test.zip'
         GameExecutable = 'GTA5.exe'
-        GameVersion = '1.0.3889.0'
-        GameSha256 = '677E4E355CFBDB13273B1D992407E3C261B3A108DC4DD5C8A0C4C1DA651802E5'
+        GameBuilds = @(
+            [ordered]@{
+                Id = 'legacy-steam-3889.0'
+                GameVersion = '1.0.3889.0'
+                GameSha256 = '677E4E355CFBDB13273B1D992407E3C261B3A108DC4DD5C8A0C4C1DA651802E5'
+            }
+        )
         Marker = 'plugins/ReactorV/ReactorV.LegacyLiveTest.json'
         OtherMarker = 'plugins/ReactorV/ReactorV.EnhancedLiveTest.json'
     }
 }
 $expectedArtifactKind = [string]$editionProfile.ArtifactKind
 $expectedGameExecutable = [string]$editionProfile.GameExecutable
-$expectedGameVersion = [string]$editionProfile.GameVersion
-$expectedGameSha256 = [string]$editionProfile.GameSha256
 $liveTestMarkerRelativePath = [string]$editionProfile.Marker
 $otherLiveTestMarkerRelativePath = [string]$editionProfile.OtherMarker
 
@@ -194,19 +207,29 @@ if (-not (Test-Path -LiteralPath $gameExecutablePath -PathType Leaf)) {
 }
 $actualGameSha256 =
     (Get-FileHash -LiteralPath $gameExecutablePath -Algorithm SHA256).Hash.ToUpperInvariant()
-if ($actualGameSha256 -ne $expectedGameSha256) {
+$gameVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo(
+    $gameExecutablePath).FileVersion
+$supportedGameBuild = @($editionProfile.GameBuilds | Where-Object {
+    [string]$_.GameVersion -eq $gameVersion -and
+    ([string]$_.GameSha256).ToUpperInvariant() -eq $actualGameSha256
+})
+if ($supportedGameBuild.Count -ne 1) {
+    $supportedBuildSummary = ($editionProfile.GameBuilds | ForEach-Object {
+        "  $($_.Id): $($_.GameVersion) SHA-256 $(([string]$_.GameSha256).ToUpperInvariant())"
+    }) -join [Environment]::NewLine
     throw @"
 Unsupported GTA V $Edition executable for this controlled live test.
-Expected $expectedGameVersion SHA-256: $expectedGameSha256
-Detected SHA-256:          $actualGameSha256
+Detected version: $gameVersion
+Detected SHA-256: $actualGameSha256
+Supported builds:
+$supportedBuildSummary
 No files were changed.
 "@
 }
-$gameVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo(
-    $gameExecutablePath).FileVersion
-if ($gameVersion -ne $expectedGameVersion) {
-    throw "Unsupported GTA V $Edition version for this controlled live test. Expected $expectedGameVersion; detected $gameVersion. No files were changed."
-}
+$selectedGameBuild = $supportedGameBuild[0]
+$expectedGameBuildId = [string]$selectedGameBuild.Id
+$expectedGameVersion = [string]$selectedGameBuild.GameVersion
+$expectedGameSha256 = ([string]$selectedGameBuild.GameSha256).ToUpperInvariant()
 
 $gameProcessName = [IO.Path]::GetFileNameWithoutExtension($expectedGameExecutable)
 if (Get-Process -Name $gameProcessName -ErrorAction SilentlyContinue) {
@@ -368,12 +391,16 @@ foreach ($field in $requiredMarkerFields) {
         throw "The $Edition live-test package marker is missing '$field'."
     }
 }
+$markerBuildIdMatches =
+    $marker.PSObject.Properties.Name -notcontains 'game_build_id' -or
+    [string]$marker.game_build_id -eq $expectedGameBuildId
 if ([int]$marker.schema_version -ne 1 -or
     [string]$marker.artifact_kind -ne $expectedArtifactKind -or
     $marker.public_release -isnot [bool] -or
     [bool]$marker.public_release -ne $false -or
     [string]$marker.target_edition -ne $Edition -or
     [string]$marker.game_executable -ne $expectedGameExecutable -or
+    -not $markerBuildIdMatches -or
     [string]$marker.game_version -ne $expectedGameVersion -or
     ([string]$marker.game_sha256).ToUpperInvariant() -ne $expectedGameSha256 -or
     $marker.experimental_render_hook -isnot [bool] -or

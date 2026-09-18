@@ -243,7 +243,7 @@ try {
         if ($candidates.Count -eq 1) {
             $target=$candidates[0]; [void]$target.Handle
             if ($target.StartTime.ToUniversalTime() -lt $armed -or $target.MainModule.FileName -ine "$game\GTA5_Enhanced.exe") { throw 'Target is not the new expected game process.' }
-            if ((Get-ComparisonHash $target.MainModule.FileName) -cne '0c52864d4521d9c9d441348aa1156958792dde8825d0297c851753f167336401') { throw 'Game executable identity changed.' }
+            if ((Get-ComparisonHash $target.MainModule.FileName) -cne '69da07ff67d05e9ded11289e597e8b8dc5855b0a429c085f37d148dc267cb2c5') { throw 'Game executable identity changed.' }
             break
         }
         Write-CollectorJson "$live\status.json" ([ordered]@{observerPid=$PID;updatedUtc=[DateTime]::UtcNow.ToString('o');state='waiting-for-user-game-launch';armedUtc=$armed.ToString('o')})

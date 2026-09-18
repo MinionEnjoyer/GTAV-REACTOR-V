@@ -28,6 +28,10 @@ int main() {
         reactorv::bootstrap::IsSupportedGameExecutable(L"C:\\Games\\GTA5_Enhanced.exe"),
         "Enhanced executable should be accepted.");
     Require(
+        !reactorv::bootstrap::IsSupportedGameExecutable(
+            L"C:\\Games\\GTA5_Enhanced_BE.exe"),
+        "The BattlEye executable must never host the Story Mode bootstrap.");
+    Require(
         !reactorv::bootstrap::IsSupportedGameExecutable(L"C:\\Games\\Other.exe"),
         "Unrelated hosts must be rejected.");
     Require(

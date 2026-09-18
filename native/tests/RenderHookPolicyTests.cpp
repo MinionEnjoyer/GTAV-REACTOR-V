@@ -37,6 +37,10 @@ int main() {
             L"D:\\Games\\GTA5_Enhanced_copy.exe"),
         "A similarly named process must not activate the injected renderer.");
     Require(
+        !reactorv::renderhook::IsEnhancedGameExecutable(
+            L"D:\\Games\\GTA5_Enhanced_BE.exe"),
+        "The BattlEye executable must not activate the Story Mode renderer.");
+    Require(
         reactorv::renderhook::IsLegacyGameExecutable(
             L"D:\\Games\\Grand Theft Auto V\\GTA5.exe") &&
         reactorv::renderhook::IsLegacyGameExecutable(
@@ -56,6 +60,9 @@ int main() {
             RenderHookEdition::Enhanced &&
         reactorv::renderhook::DetectRenderHookEdition(
             L"D:\\Games\\PlayGTAV.exe") ==
+            RenderHookEdition::Unsupported &&
+        reactorv::renderhook::DetectRenderHookEdition(
+            L"D:\\Games\\GTA5_Enhanced_BE.exe") ==
             RenderHookEdition::Unsupported,
         "Edition detection must fail closed to the two exact GTA images.");
 

@@ -25,11 +25,13 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $legacyStartupObserverEnabled = -not $DisableLegacyStartupObserver
 $enhancedLiveTestGameExecutable = 'GTA5_Enhanced.exe'
-$enhancedLiveTestGameVersion = '1.0.1158.13'
+$enhancedLiveTestGameBuildId = 'enhanced-steam-tu-1.73-1158.16'
+$enhancedLiveTestGameVersion = '1.0.1158.16'
 $enhancedLiveTestGameSha256 =
-    '0c52864d4521d9c9d441348aa1156958792dde8825d0297c851753f167336401'
+    '69da07ff67d05e9ded11289e597e8b8dc5855b0a429c085f37d148dc267cb2c5'
 $enhancedLiveTestMarkerName = 'ReactorV.EnhancedLiveTest.json'
 $legacyLiveTestGameExecutable = 'GTA5.exe'
+$legacyLiveTestGameBuildId = 'legacy-steam-3889.0'
 $legacyLiveTestGameVersion = '1.0.3889.0'
 $legacyLiveTestGameSha256 =
     '677e4e355cfbdb13273b1d992407e3c261b3a108dc4dd5c8a0c4c1da651802e5'
@@ -126,13 +128,13 @@ $harnessReportName = if ($IncludeExperimentalEnhancedRenderHook) {
     'reactor-harness-report.developer.json'
 }
 $archiveName = if ($IncludeExperimentalEnhancedRenderHook) {
-    'ReactorV-0.2.5-enhanced-live-test.zip'
+    'ReactorV-0.2.6-enhanced-live-test.zip'
 } elseif ($IncludeExperimentalLegacyRenderHook) {
-    'ReactorV-0.2.5-legacy-live-test.zip'
+    'ReactorV-0.2.6-legacy-live-test.zip'
 } elseif ($releaseEligible) {
-    'ReactorV-0.2.5.zip'
+    'ReactorV-0.2.6.zip'
 } else {
-    'ReactorV-0.2.5-developer.zip'
+    'ReactorV-0.2.6-developer.zip'
 }
 $harnessReportPath = Join-Path $artifactsRoot "harness\$harnessReportName"
 $nativeCTestReportPath = Join-Path $artifactsRoot "harness\native-ctest.$artifactKind.junit.xml"
@@ -321,6 +323,11 @@ $harnessReport = [ordered]@{
             $enhancedLiveTestGameExecutable
         } elseif ($IncludeExperimentalLegacyRenderHook) {
             $legacyLiveTestGameExecutable
+        } else { $null })
+        target_game_build_id = $(if ($IncludeExperimentalEnhancedRenderHook) {
+            $enhancedLiveTestGameBuildId
+        } elseif ($IncludeExperimentalLegacyRenderHook) {
+            $legacyLiveTestGameBuildId
         } else { $null })
         target_game_version = $(if ($IncludeExperimentalEnhancedRenderHook) {
             $enhancedLiveTestGameVersion
@@ -1201,6 +1208,7 @@ if ($IncludeExperimentalEnhancedRenderHook) {
         public_release = $false
         target_edition = 'Enhanced'
         game_executable = $enhancedLiveTestGameExecutable
+        game_build_id = $enhancedLiveTestGameBuildId
         game_version = $enhancedLiveTestGameVersion
         game_sha256 = $enhancedLiveTestGameSha256
         experimental_render_hook = $true
@@ -1214,6 +1222,7 @@ if ($IncludeExperimentalEnhancedRenderHook) {
         public_release = $false
         target_edition = 'Legacy'
         game_executable = $legacyLiveTestGameExecutable
+        game_build_id = $legacyLiveTestGameBuildId
         game_version = $legacyLiveTestGameVersion
         game_sha256 = $legacyLiveTestGameSha256
         experimental_render_hook = $true
@@ -2407,5 +2416,5 @@ Write-Host "SHA-256: $hash"
 Write-Host "Package budgets PASS: staging=$stagingBytes bytes, archive=$archiveBytes bytes"
 Write-Host "Harness report: $harnessReportPath"
 if (-not $releaseEligible) {
-    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.5.zip or its release receipt."
+    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.6.zip or its release receipt."
 }

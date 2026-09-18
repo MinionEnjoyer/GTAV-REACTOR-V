@@ -8,27 +8,27 @@ Build React/HTML menus and overlays for **GTA V Story Mode** on **Legacy and Enh
 A shared runtime by **MinionEnjoyer**: each mod keeps ownership of its gameplay,
 settings and saved data. No ALLIN1 Launcher or gameplay client required.
 
-**0.2.5 — unsigned, edition-specific manual-download release.**
+**0.2.6 — unsigned, edition-specific manual download.**
 Use the package for your exact supported game version. **Not for GTA Online.**
 See the release notes for validation coverage and known limits.
 
 Got feedback, or need help?  Come chat in our community [Discord](https://discord.gg/hs7c2XfdD)!
 
-## What's new in 0.2.5
+## What's new in 0.2.6
 
-- Consolidates startup, desktop/DPI presentation, passive-HUD ownership, and menu/input work onto one mainline.
-- Retains 0.2.4's late-adapter recovery, bounded bootstrap attachment, and fresh-frame readiness checks.
-- Adds bounded native diagnostic tracing and preserves ALLIN1's generated catalog indexes during updates.
-- Ships a release-matched diagnostic checker with installation identity, dependency probes, and older-release references.
+- Adds a fail-closed Steam Enhanced profile for GTA V Title Update 1.73 (`1.0.1158.16`).
+- Retains the prior Enhanced `1.0.1158.13` installer profile and the current Legacy profile.
+- Keeps the complete renderer, menu, HUD, and consumer feature set on both editions.
+- Explicitly tests that the BattlEye executable cannot host the Story Mode bootstrap or renderer.
 
-[0.2.5 release notes](https://github.com/MinionEnjoyer/GTAV-REACTOR-V/releases/tag/v0.2.5) ·
-[Consolidation validation and limits](docs/RELEASE-0.2.5.md) ·
+[Title Update 1.73 compatibility scope](docs/GTA-1.73-COMPATIBILITY.md) ·
+[0.2.6 release notes](docs/RELEASE-0.2.6.md) ·
 [ReShade compatibility](docs/DXGI-COMPATIBILITY.md)
 
 ## Downloads
 
 [Published builds](https://github.com/MinionEnjoyer/GTAV-REACTOR-V/releases) are on GitHub.
-Choose **one** full runtime ZIP: **Legacy 1.0.3889.0** or **Enhanced 1.0.1158.13**.
+Choose **one** full runtime ZIP: **Legacy 1.0.3889.0** or **Enhanced 1.0.1158.16**.
 The historical `live-test` filenames retain edition/version guards; they are not incremental patches.
 
 Downloads are **unsigned**. Verify the matching SHA-256 checksum before installing.

@@ -19,7 +19,7 @@ $OutputDirectory=Assert-CollectorOutput $OutputDirectory
 if (-not $OutputDirectory.StartsWith((Get-CollectorDataRoot)+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Use the shared local diagnostics root.' }
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Choose a fresh watcher output directory.' }
 $expectedExe='D:\Programs\Steam\steamapps\common\Grand Theft Auto V Enhanced\GTA5_Enhanced.exe'
-$expectedHash='0c52864d4521d9c9d441348aa1156958792dde8825d0297c851753f167336401'
+$expectedHash='69da07ff67d05e9ded11289e597e8b8dc5855b0a429c085f37d148dc267cb2c5'
 $logRoot=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ReactorV'
 if ($Rehearsal) {
     $FixtureDirectory=Assert-CollectorOutput $FixtureDirectory

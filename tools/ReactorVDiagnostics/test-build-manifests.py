@@ -21,7 +21,7 @@ class ManifestGeneratorTests(unittest.TestCase):
     def make_archive(self, root, version, edition, unsafe=None, duplicate=False):
         path = root / f"ReactorV-{version}-{edition.lower()}-live-test.zip"
         marker = {"schema_version": 1, "artifact_kind": edition.lower()+"-live-test", "public_release": False, "target_edition": edition,
-                  "game_executable": "GTA5_Enhanced.exe" if edition == "Enhanced" else "GTA5.exe", "game_version": "1", "game_sha256": "a"*64, "experimental_render_hook": True}
+                  "game_executable": "GTA5_Enhanced.exe" if edition == "Enhanced" else "GTA5.exe", "game_build_id": edition.lower() + "-test-build", "game_version": "1", "game_sha256": "a"*64, "experimental_render_hook": True}
         files = {"ReactorV.Bootstrap.asi": b"b", "ReactorV.RenderHook.asi": b"r", "ReactorV.ScriptProbe.asi": b"s", "plugins/ReactorV/RageWebUI.Native.dll": b"n", "plugins/ReactorV/ReactorV.Preloader.exe": b"p",
                  "scripts/ReactorV/ReactorV.contract.json": json.dumps({"schema_version":1,"product":"reactor-v","runtime_version":version}).encode(),
                  f"plugins/ReactorV/ReactorV.{edition}LiveTest.json": json.dumps(marker).encode()}

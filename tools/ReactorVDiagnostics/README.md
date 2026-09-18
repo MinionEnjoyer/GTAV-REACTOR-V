@@ -132,7 +132,7 @@ game as a release reference. Use a developer Python 3 executable explicitly if
 `python` is not on PATH:
 
 ```powershell
-.\tools\prepare-release-diagnostics.ps1 -ReleaseVersion 0.2.5 `
+.\tools\prepare-release-diagnostics.ps1 -ReleaseVersion 0.2.6 `
   -EnhancedArchive <final-enhanced.zip> -EnhancedSidecar <final-enhanced.zip.sha256> `
   -LegacyArchive <final-legacy.zip> -LegacySidecar <final-legacy.zip.sha256> `
   -PythonPath <python.exe> -OutputDirectory <fresh-output-directory>

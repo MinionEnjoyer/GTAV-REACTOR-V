@@ -6,8 +6,10 @@ namespace RageWebUI.Core.Tests
 {
     public sealed class EnhancedLiveTestPackageSourceContractTests
     {
-        private const string SupportedEnhancedSha256 =
+        private const string PreviousEnhancedSha256 =
             "0C52864D4521D9C9D441348AA1156958792DDE8825D0297C851753F167336401";
+        private const string CurrentEnhancedSha256 =
+            "69DA07FF67D05E9DED11289E597E8B8DC5855B0A429C085F37D148DC267CB2C5";
 
         [Fact]
         public void Experimental_hook_has_a_distinct_fully_gated_non_public_artifact()
@@ -25,9 +27,13 @@ namespace RageWebUI.Core.Tests
                 StringComparison.Ordinal);
             Assert.Contains("'enhanced-live-test'", build, StringComparison.Ordinal);
             Assert.Contains(
-                "'ReactorV-0.2.5-enhanced-live-test.zip'",
+                "'ReactorV-0.2.6-enhanced-live-test.zip'",
                 build,
                 StringComparison.Ordinal);
+            Assert.Contains("'1.0.1158.16'", build, StringComparison.Ordinal);
+            Assert.Contains(CurrentEnhancedSha256, build, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("'enhanced-steam-tu-1.73-1158.16'", build, StringComparison.Ordinal);
+            Assert.Contains("game_build_id = $enhancedLiveTestGameBuildId", build, StringComparison.Ordinal);
             Assert.Contains("public_release = $false", build, StringComparison.Ordinal);
             Assert.Contains(
                 "The Enhanced live-test marker must remain outside every Legacy, public, or developer player package.",
@@ -79,8 +85,11 @@ namespace RageWebUI.Core.Tests
                 install,
                 StringComparison.Ordinal);
             Assert.Contains("'GTA5_Enhanced.exe'", install, StringComparison.Ordinal);
+            Assert.Contains("'1.0.1158.16'", install, StringComparison.Ordinal);
             Assert.Contains("'1.0.1158.13'", install, StringComparison.Ordinal);
-            Assert.Contains(SupportedEnhancedSha256, install, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(CurrentEnhancedSha256, install, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(PreviousEnhancedSha256, install, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("enhanced-steam-tu-1.73-1158.16", install, StringComparison.Ordinal);
             Assert.Contains(
                 "'ReactorV-*-enhanced-live-test.zip'",
                 install,
@@ -106,6 +115,10 @@ namespace RageWebUI.Core.Tests
                 install,
                 StringComparison.Ordinal);
             Assert.Contains(
+                "[string]$marker.game_build_id -eq $expectedGameBuildId",
+                install,
+                StringComparison.Ordinal);
+            Assert.Contains(
                 "$_.FullName.Replace('\\', '/').Equals(",
                 install,
                 StringComparison.Ordinal);
@@ -115,7 +128,7 @@ namespace RageWebUI.Core.Tests
                 StringComparison.Ordinal);
 
             var executableHashCheck = install.IndexOf(
-                "$actualGameSha256 -ne $expectedGameSha256",
+                "$supportedGameBuild.Count -ne 1",
                 StringComparison.Ordinal);
             var selectedArchiveHash = install.IndexOf(
                 "Get-FileHash -LiteralPath $resolvedArchive -Algorithm SHA256",

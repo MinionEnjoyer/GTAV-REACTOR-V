@@ -119,7 +119,7 @@ foreach ($file in $files) {
     $source=Join-Path $PayloadDirectory $file.name; Assert-Safe $source
     if ((Get-ComparisonHash $source) -cne $file.candidate) { throw ('Candidate hash mismatch: '+$file.name) }
 }
-if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $GameDirectory 'GTA5_Enhanced.exe')).FileVersion -ne '1.0.1158.13') { throw 'Wrong game version.' }
+if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $GameDirectory 'GTA5_Enhanced.exe')).FileVersion -ne '1.0.1158.16') { throw 'Wrong game version.' }
 $identity=$core.GetMethod('Preflight').Invoke($baseline,$null)
 $identity['scripts/ALLIN1.dll']=Get-ComparisonHash (Join-Path $GameDirectory 'scripts/ALLIN1.dll')
 if ($Action -eq 'Preflight') { Write-Output 'PREFLIGHT PASSED: baseline and all five exact candidate targets verified; no files changed.'; exit 0 }

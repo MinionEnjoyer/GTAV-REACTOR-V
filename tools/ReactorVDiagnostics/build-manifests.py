@@ -49,7 +49,7 @@ def inspect(archive_path, sidecar_path, version, edition):
             raise ValueError("Release contract does not identify the requested runtime version")
         marker = json_entry(f"plugins/ReactorV/ReactorV.{edition}LiveTest.json")
         expected_exe = "GTA5_Enhanced.exe" if edition == "Enhanced" else "GTA5.exe"
-        if marker.get("schema_version") != 1 or marker.get("artifact_kind") != edition.lower() + "-live-test" or marker.get("target_edition") != edition or marker.get("game_executable") != expected_exe or marker.get("public_release") is not False or marker.get("experimental_render_hook") is not True or not isinstance(marker.get("game_version"), str) or not SHA256.fullmatch(str(marker.get("game_sha256", ""))):
+        if marker.get("schema_version") != 1 or marker.get("artifact_kind") != edition.lower() + "-live-test" or marker.get("target_edition") != edition or marker.get("game_executable") != expected_exe or marker.get("public_release") is not False or marker.get("experimental_render_hook") is not True or not isinstance(marker.get("game_build_id"), str) or not marker.get("game_build_id") or not isinstance(marker.get("game_version"), str) or not SHA256.fullmatch(str(marker.get("game_sha256", ""))):
             raise ValueError("Release edition marker is invalid or does not match the requested edition")
     by_path = {record["path"]: record for record in records}
     identity_paths = IDENTITY_PATHS + (f"plugins/ReactorV/ReactorV.{edition}LiveTest.json",)
