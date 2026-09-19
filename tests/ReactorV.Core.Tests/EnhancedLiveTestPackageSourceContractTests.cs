@@ -184,33 +184,27 @@ namespace RageWebUI.Core.Tests
                 install,
                 StringComparison.Ordinal);
             Assert.Contains(
-                "Get-OwnedExtensionAssetManifest",
+                "Get-ReactorVOwnedExtensionAssetManifest",
                 install,
                 StringComparison.Ordinal);
             Assert.Contains(
-                "Test-OwnedExtensionAssetManifest",
+                "Test-ReactorVOwnedExtensionAssetManifest",
                 install,
                 StringComparison.Ordinal);
+            var ownershipModule = ReadRepositoryFile(
+                "tools",
+                "ReactorV.InstallOwnership.psm1");
             Assert.Contains(
-                "The protected ALLIN1 asset root may contain only PNG files or approved catalogue indexes",
-                install,
+                "The protected ALLIN1 artwork root may contain only PNG files and approved catalog indexes",
+                ownershipModule,
                 StringComparison.Ordinal);
             Assert.Contains(
-                "$isApprovedCatalogueIndex = @(",
-                install,
+                "'^(?:default|generated)-(?:weapons|vehicles|gear)/index\\.json$'",
+                ownershipModule,
                 StringComparison.Ordinal);
-            foreach (var approvedIndex in new[]
-            {
-                "generated-gear/index.json",
-                "generated-vehicles/index.json",
-                "generated-weapons/index.json",
-            })
-            {
-                Assert.Contains(approvedIndex, install, StringComparison.Ordinal);
-            }
             Assert.Contains(
-                "-not $isApprovedCatalogueIndex",
-                install,
+                "The protected ALLIN1 catalog index exceeds the 512 KiB preservation limit",
+                ownershipModule,
                 StringComparison.Ordinal);
             Assert.Contains(
                 "The Reactor V update changed or removed existing ALLIN1 catalog artwork",

@@ -155,6 +155,70 @@ function Test-ReactorVPreloaderConfiguration {
     }
 }
 
+function Get-ReactorVOwnedExtensionAssetManifest {
+    param([Parameter(Mandatory)] [string]$Root)
+
+    $manifest = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $Root)) { return $manifest }
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        throw "Expected the extension asset root to be a directory: $Root"
+    }
+    if ((Get-Item -LiteralPath $Root -Force).Attributes -band
+        [IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing to preserve a reparse-point extension asset root: $Root"
+    }
+
+    foreach ($directory in Get-ChildItem -LiteralPath $Root -Directory -Recurse -Force) {
+        if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to preserve a reparse-point extension asset directory: $($directory.FullName)"
+        }
+    }
+    $files = @(Get-ChildItem -LiteralPath $Root -File -Recurse -Force)
+    if ($files.Count -gt 4096) {
+        throw "The extension asset root exceeds the 4096-file preservation limit: $Root"
+    }
+    [long]$totalBytes = 0
+    foreach ($file in $files) {
+        if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to preserve a reparse-point extension asset: $($file.FullName)"
+        }
+        $relative = $file.FullName.Substring($Root.Length).TrimStart(
+            [char[]]'\/').Replace('\', '/')
+        $isCatalogIndex = $relative -match `
+            '^(?:default|generated)-(?:weapons|vehicles|gear)/index\.json$'
+        if (-not $file.Extension.Equals('.png', [StringComparison]::OrdinalIgnoreCase) -and
+            -not $isCatalogIndex) {
+            throw "The protected ALLIN1 artwork root may contain only PNG files and approved catalog indexes: $($file.FullName)"
+        }
+        if ($isCatalogIndex -and $file.Length -gt 524288) {
+            throw "The protected ALLIN1 catalog index exceeds the 512 KiB preservation limit: $($file.FullName)"
+        }
+        $totalBytes += $file.Length
+        if ($totalBytes -gt 536870912) {
+            throw "The extension asset root exceeds the 512 MiB preservation limit: $Root"
+        }
+        $manifest[$relative] = Get-ReactorVFileSha256 -Path $file.FullName
+    }
+    return $manifest
+}
+
+function Test-ReactorVOwnedExtensionAssetManifest {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary]$Expected,
+        [Parameter(Mandatory)] [string]$Root
+    )
+
+    $actual = Get-ReactorVOwnedExtensionAssetManifest -Root $Root
+    if ($actual.Count -ne $Expected.Count) { return $false }
+    foreach ($relative in $Expected.Keys) {
+        if (-not $actual.Contains($relative) -or
+            [string]$actual[$relative] -ne [string]$Expected[$relative]) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function New-ReactorVPreservedEntry {
     param(
         [Parameter(Mandatory)] [string]$Scope,
@@ -397,5 +461,7 @@ function Test-ReactorVPreservedFileManifest {
 Export-ModuleMember -Function @(
     'Get-ReactorVPreservedFileManifest',
     'Restore-ReactorVPreservedFiles',
-    'Test-ReactorVPreservedFileManifest'
+    'Test-ReactorVPreservedFileManifest',
+    'Get-ReactorVOwnedExtensionAssetManifest',
+    'Test-ReactorVOwnedExtensionAssetManifest'
 )

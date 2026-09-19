@@ -89,77 +89,6 @@ function Copy-DirectorySnapshot {
     Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
 }
 
-function Get-OwnedExtensionAssetManifest {
-    param(
-        [Parameter(Mandatory)] [string]$Root
-    )
-
-    $manifest = [ordered]@{}
-    if (-not (Test-Path -LiteralPath $Root)) {
-        return $manifest
-    }
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        throw "Expected the extension asset root to be a directory: $Root"
-    }
-    if ((Get-Item -LiteralPath $Root -Force).Attributes -band
-        [IO.FileAttributes]::ReparsePoint) {
-        throw "Refusing to preserve a reparse-point extension asset root: $Root"
-    }
-
-    $files = @(Get-ChildItem -LiteralPath $Root -File -Recurse -Force)
-    if ($files.Count -gt 4096) {
-        throw "The extension asset root exceeds the 4096-file preservation limit: $Root"
-    }
-    [long]$totalBytes = 0
-    foreach ($file in $files) {
-        if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            throw "Refusing to preserve a reparse-point extension asset: $($file.FullName)"
-        }
-        $relative = $file.FullName.Substring($Root.Length).TrimStart([char[]]'\/').Replace('\', '/')
-        # ALLIN1's generated catalogues pair their PNG artwork with these three
-        # indexes. Keep this allowlist exact: it is not a general data-file or
-        # executable-file allowance.
-        $isApprovedCatalogueIndex = @(
-            'generated-gear/index.json',
-            'generated-vehicles/index.json',
-            'generated-weapons/index.json'
-        ) -contains $relative
-        if (-not $file.Extension.Equals('.png', [StringComparison]::OrdinalIgnoreCase) -and
-            -not $isApprovedCatalogueIndex) {
-            throw "The protected ALLIN1 asset root may contain only PNG files or approved catalogue indexes: $($file.FullName)"
-        }
-        $totalBytes += $file.Length
-        if ($totalBytes -gt 536870912) {
-            throw "The extension asset root exceeds the 512 MiB preservation limit: $Root"
-        }
-        $relative = $file.FullName.Substring($Root.Length).TrimStart(
-            [char[]]'\/').Replace('\', '/')
-        $manifest[$relative] = (
-            Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256
-        ).Hash
-    }
-    return $manifest
-}
-
-function Test-OwnedExtensionAssetManifest {
-    param(
-        [Parameter(Mandatory)] [System.Collections.IDictionary]$Expected,
-        [Parameter(Mandatory)] [string]$Root
-    )
-
-    $actual = Get-OwnedExtensionAssetManifest -Root $Root
-    if ($actual.Count -ne $Expected.Count) {
-        return $false
-    }
-    foreach ($relative in $Expected.Keys) {
-        if (-not $actual.Contains($relative) -or
-            [string]$actual[$relative] -ne [string]$Expected[$relative]) {
-            return $false
-        }
-    }
-    return $true
-}
-
 function Restore-InstallSnapshot {
     param(
         [Parameter(Mandatory)] [string]$BackupRoot,
@@ -487,7 +416,7 @@ $extensionAssetsWerePresent = Test-Path `
     -LiteralPath $extensionAssetTarget `
     -PathType Container
 $extensionAssetManifestBefore = if ($extensionAssetsWerePresent) {
-    Get-OwnedExtensionAssetManifest -Root $extensionAssetTarget
+    Get-ReactorVOwnedExtensionAssetManifest -Root $extensionAssetTarget
 } else {
     [ordered]@{}
 }
@@ -646,7 +575,7 @@ try {
     }
     $extensionAssetsPreserved =
         -not $extensionAssetsWerePresent -or
-        (Test-OwnedExtensionAssetManifest `
+        (Test-ReactorVOwnedExtensionAssetManifest `
             -Expected $extensionAssetManifestBefore `
             -Root $extensionAssetTarget)
     if (-not $extensionAssetsPreserved) {

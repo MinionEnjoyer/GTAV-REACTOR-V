@@ -38,28 +38,6 @@ function Copy-FixtureTree {
 $module = Join-Path $PSScriptRoot 'ReactorV.InstallOwnership.psm1'
 Import-Module -Name $module -Force -ErrorAction Stop
 
-# The protected ALLIN1 asset manifest is implemented by the updater script.
-# Import only its two helper definitions, never the parameterized install body.
-$installer = Join-Path $PSScriptRoot 'install-live-test-package.ps1'
-$tokens = $null
-$parseErrors = $null
-$installerAst = [System.Management.Automation.Language.Parser]::ParseFile(
-    $installer,
-    [ref]$tokens,
-    [ref]$parseErrors)
-if ($parseErrors.Count -gt 0) {
-    throw "Unable to parse installer asset-manifest functions: $($parseErrors[0].Message)"
-}
-foreach ($functionAst in @($installerAst.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -in @(
-                'Get-OwnedExtensionAssetManifest',
-                'Test-OwnedExtensionAssetManifest')
-        }, $true))) {
-    . ([scriptblock]::Create($functionAst.Extent.Text))
-}
-
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ('ReactorV-ownership-' + [Guid]::NewGuid().ToString('N'))
@@ -96,6 +74,14 @@ try {
     Write-FixtureText (Join-Path $existingPlugin 'ReactorV.EnhancedLiveTest.json') 'old-edition-marker'
     Write-FixtureText (Join-Path $existingPlugin 'ui\assets\app-old.js') 'old-ui'
     Write-FixtureText (Join-Path $existingPlugin 'ui\assets\allin1\vehicle.png') 'allin1-art'
+    $catalogIndex = '{"schema_version":1,"owner":"allin1.default-previews","images":{}}'
+    foreach ($prefix in @('default', 'generated')) {
+        foreach ($category in @('weapons', 'vehicles', 'gear')) {
+            Write-FixtureText `
+                (Join-Path $existingPlugin "ui\assets\allin1\$prefix-$category\index.json") `
+                $catalogIndex
+        }
+    }
     Write-FixtureText (Join-Path $existingPlugin 'ui\assets\allin1\generated-gear\index.json') '{"items":["gear"]}'
     Write-FixtureText (Join-Path $existingPlugin 'ui\assets\allin1\generated-vehicles\index.json') '{"items":["vehicle"]}'
     Write-FixtureText (Join-Path $existingPlugin 'ui\assets\allin1\generated-weapons\index.json') '{"items":["weapon"]}'
@@ -109,6 +95,42 @@ try {
     Write-FixtureText (Join-Path $incomingPlugin 'ReactorV.Preloader.json') '{"externalGpuBrowserShadow":false,"externalGpuFrameRate":30}'
     Write-FixtureText (Join-Path $incomingPlugin 'ReactorV.EnhancedLiveTest.json') 'new-edition-marker'
     Write-FixtureText (Join-Path $incomingPlugin 'ui\assets\app-new.js') 'new-ui'
+
+    $unexpectedIndex = Join-Path $existingPlugin 'ui\assets\allin1\default-gear\unexpected.json'
+    Write-FixtureText $unexpectedIndex '{}'
+    $unexpectedIndexRejected = $false
+    try {
+        [void](Get-ReactorVOwnedExtensionAssetManifest `
+            -Root (Join-Path $existingPlugin 'ui\assets\allin1'))
+    } catch {
+        $unexpectedIndexRejected = $_.Exception.Message -like '*approved catalog indexes*'
+    }
+    Assert-OwnershipTest $unexpectedIndexRejected `
+        'Arbitrary JSON under the protected ALLIN1 artwork root was accepted.'
+    Remove-Item -LiteralPath $unexpectedIndex -Force
+
+    $oversizedIndex = Join-Path $existingPlugin 'ui\assets\allin1\generated-gear\index.json'
+    Write-FixtureText $oversizedIndex ([string]::new([char]'x', 524289))
+    $oversizedIndexRejected = $false
+    try {
+        [void](Get-ReactorVOwnedExtensionAssetManifest `
+            -Root (Join-Path $existingPlugin 'ui\assets\allin1'))
+    } catch {
+        $oversizedIndexRejected = $_.Exception.Message -like '*512 KiB preservation limit*'
+    }
+    Assert-OwnershipTest $oversizedIndexRejected `
+        'An oversized approved ALLIN1 catalog index was accepted.'
+    Write-FixtureText $oversizedIndex $catalogIndex
+
+    $artworkManifest = Get-ReactorVOwnedExtensionAssetManifest `
+        -Root (Join-Path $existingPlugin 'ui\assets\allin1')
+    foreach ($prefix in @('default', 'generated')) {
+        foreach ($category in @('weapons', 'vehicles', 'gear')) {
+            Assert-OwnershipTest (
+                $artworkManifest.Contains("$prefix-$category/index.json")) `
+                "The approved ALLIN1 $prefix-$category catalog index was rejected or omitted."
+        }
+    }
 
     $manifest = @(Get-ReactorVPreservedFileManifest `
         -ExistingScriptRoot $existingScript `
@@ -125,6 +147,7 @@ try {
         'Script:Partner/helper.dll',
         'Plugin:ReactorV.Preloader.json',
         'Plugin:ui/assets/allin1/vehicle.png',
+        'Plugin:ui/assets/allin1/default-gear/index.json',
         'Plugin:ui/assets/partner/preview.webp',
         'Plugin:extensions/partner/settings.json'
     )) {
@@ -143,7 +166,7 @@ try {
     }
 
     $catalogueRoot = Join-Path $existingPlugin 'ui\assets\allin1'
-    $catalogueManifest = Get-OwnedExtensionAssetManifest -Root $catalogueRoot
+    $catalogueManifest = Get-ReactorVOwnedExtensionAssetManifest -Root $catalogueRoot
     foreach ($relative in @(
         'generated-gear/index.json',
         'generated-vehicles/index.json',
@@ -152,22 +175,22 @@ try {
         Assert-OwnershipTest ($catalogueManifest.Contains($relative)) "Approved ALLIN1 catalogue index was not preserved: $relative"
     }
     Assert-OwnershipTest (
-        (Test-OwnedExtensionAssetManifest -Expected $catalogueManifest -Root $catalogueRoot)) `
+        (Test-ReactorVOwnedExtensionAssetManifest -Expected $catalogueManifest -Root $catalogueRoot)) `
         'The untouched ALLIN1 catalogue asset manifest did not verify.'
     Write-FixtureText (Join-Path $catalogueRoot 'generated-gear\index.json') '{"items":["tampered"]}'
     Assert-OwnershipTest (
-        -not (Test-OwnedExtensionAssetManifest -Expected $catalogueManifest -Root $catalogueRoot)) `
+        -not (Test-ReactorVOwnedExtensionAssetManifest -Expected $catalogueManifest -Root $catalogueRoot)) `
         'A tampered approved ALLIN1 catalogue index incorrectly verified.'
     Write-FixtureText (Join-Path $catalogueRoot 'untrusted.exe') 'not-an-asset'
     $unknownAssetRejected = $false
     try {
-        [void](Get-OwnedExtensionAssetManifest -Root $catalogueRoot)
+        [void](Get-ReactorVOwnedExtensionAssetManifest -Root $catalogueRoot)
     } catch {
-        $unknownAssetRejected = $_.Exception.Message -like '*only PNG files or approved catalogue indexes*'
+        $unknownAssetRejected = $_.Exception.Message -like '*only PNG files and approved catalog indexes*'
     }
     Assert-OwnershipTest $unknownAssetRejected 'An unknown executable was accepted in the protected ALLIN1 asset root.'
     Remove-Item -LiteralPath (Join-Path $catalogueRoot 'untrusted.exe') -Force
-    Write-FixtureText (Join-Path $catalogueRoot 'generated-gear\index.json') '{"items":["gear"]}'
+    Write-FixtureText (Join-Path $catalogueRoot 'generated-gear\index.json') $catalogIndex
 
     Copy-FixtureTree $existingScript $backupScript
     Copy-FixtureTree $existingPlugin $backupPlugin
@@ -186,6 +209,11 @@ try {
             -TargetScriptRoot $targetScript `
             -TargetPluginRoot $targetPlugin)) `
         'The restored extension manifest did not verify.'
+    Assert-OwnershipTest (
+        (Test-ReactorVOwnedExtensionAssetManifest `
+            -Expected $artworkManifest `
+            -Root (Join-Path $targetPlugin 'ui\assets\allin1'))) `
+        'The restored ALLIN1 artwork manifest did not verify.'
     Assert-OwnershipTest (
         [IO.File]::ReadAllText((Join-Path $targetScript 'ReactorV.json')) -ceq
             $userSettings) `
