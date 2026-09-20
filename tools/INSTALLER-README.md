@@ -1,8 +1,14 @@
 # Reactor V runtime updater
 
 Close GTA before updating. Download the matching edition runtime ZIP and its
-SHA-256 file from the same Reactor V release. This kit contains only the updater;
-it does not include the runtime or third-party game-hook dependencies.
+SHA-256 file from the same Reactor V runtime release. This kit contains only the
+updater; it does not include the runtime or third-party game-hook dependencies.
+
+The 0.2.7 updater-only kit is intentionally compatible with the already
+qualified 0.2.6 Enhanced and Legacy runtime archives. It fixes preservation of
+ALLIN1's `default-*` and `generated-*` preview catalogue indexes; it does not
+replace, rebuild, or broaden the supported native runtime. Continue to verify
+the runtime archive checksum published with 0.2.6.
 
 Check the downloaded runtime hash with `Get-FileHash -Algorithm SHA256`. Keep this
 kit in a writable directory outside the game folder and run, for example:

@@ -5,6 +5,16 @@ previous checker ZIP with a new runtime: its reference hashes describe different
 binaries. Retain older reference manifests so the new checker can identify older
 installations without calling them corrupt merely because they are not current.
 
+## Installer-only releases
+
+An installer-only release is permitted only when it changes no runtime archive,
+native binary, managed runtime assembly, browser content, or diagnostic checker.
+State that boundary prominently, retain the exact existing runtime archive names
+and executable SHA-256 gates, and publish only the versioned installer ZIP and
+its checksum. Do not relabel old runtime or diagnostic assets as a new runtime
+release. Run both `tools/test-install-ownership.ps1` and
+`tools/test-installer-package.ps1` before publishing.
+
 1. Consolidate and review changes on main. Update runtime, native resource,
    contract, web package, checker, and active documentation versions together.
 2. Commit the source before building. Run `build-package.ps1` separately for
