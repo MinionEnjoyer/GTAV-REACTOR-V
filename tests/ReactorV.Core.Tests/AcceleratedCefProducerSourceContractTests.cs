@@ -135,9 +135,9 @@ public sealed class AcceleratedCefProducerSourceContractTests
         Assert.Contains("ThreadPool.QueueUserWorkItem", session);
         Assert.Contains("Never tear down CefSharp from OnAcceleratedPaint", session);
 
-        var stopBrowser = session.IndexOf("StopBrowser();", StringComparison.Ordinal);
-        var stopProducer = session.IndexOf("StopProducer();", stopBrowser, StringComparison.Ordinal);
-        Assert.True(stopBrowser >= 0 && stopProducer > stopBrowser);
+        Assert.Contains("if (StopBrowser()) StopProducer();", session);
+        Assert.Contains("_frameEpochGate.RetireAndDrain(", session);
+        Assert.Contains("QueueDeferredBrowserCleanup();", session);
 
         Assert.Contains("RWUI_StartSharedTextureProducer", native);
         Assert.Contains("RWUI_SetSharedTextureProducerVisible", native);
@@ -288,9 +288,9 @@ public sealed class AcceleratedCefProducerSourceContractTests
             StringComparison.Ordinal);
         Assert.True(disableEnd > disable);
         var disableBody = session.Substring(disable, disableEnd - disable);
-        var stopBrowser = disableBody.IndexOf("StopBrowser();", StringComparison.Ordinal);
-        var stopProducer = disableBody.IndexOf("StopProducer();", StringComparison.Ordinal);
-        Assert.True(stopBrowser >= 0 && stopProducer > stopBrowser);
+        var drainGuard = disableBody.IndexOf("if (!StopBrowser()) return;", StringComparison.Ordinal);
+        var producerStop = disableBody.IndexOf("StopProducer();", StringComparison.Ordinal);
+        Assert.True(drainGuard >= 0 && producerStop > drainGuard);
         Assert.Contains("Volatile.Write(ref _transportReady, 0)", disableBody);
         Assert.Contains("Volatile.Write(ref _started, 0)", disableBody);
         Assert.DoesNotContain("AttachBrowser", disableBody);

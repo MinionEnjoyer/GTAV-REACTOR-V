@@ -128,13 +128,13 @@ $harnessReportName = if ($IncludeExperimentalEnhancedRenderHook) {
     'reactor-harness-report.developer.json'
 }
 $archiveName = if ($IncludeExperimentalEnhancedRenderHook) {
-    'ReactorV-0.2.6-enhanced-live-test.zip'
+    'ReactorV-0.2.8-enhanced-live-test.zip'
 } elseif ($IncludeExperimentalLegacyRenderHook) {
-    'ReactorV-0.2.6-legacy-live-test.zip'
+    'ReactorV-0.2.8-legacy-live-test.zip'
 } elseif ($releaseEligible) {
-    'ReactorV-0.2.6.zip'
+    'ReactorV-0.2.8.zip'
 } else {
-    'ReactorV-0.2.6-developer.zip'
+    'ReactorV-0.2.8-developer.zip'
 }
 $harnessReportPath = Join-Path $artifactsRoot "harness\$harnessReportName"
 $nativeCTestReportPath = Join-Path $artifactsRoot "harness\native-ctest.$artifactKind.junit.xml"
@@ -2416,5 +2416,5 @@ Write-Host "SHA-256: $hash"
 Write-Host "Package budgets PASS: staging=$stagingBytes bytes, archive=$archiveBytes bytes"
 Write-Host "Harness report: $harnessReportPath"
 if (-not $releaseEligible) {
-    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.6.zip or its release receipt."
+    Write-Warning "Non-public artifact only ($artifactKind): $archiveName. It did not overwrite ReactorV-0.2.8.zip or its release receipt."
 }

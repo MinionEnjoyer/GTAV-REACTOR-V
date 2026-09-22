@@ -1,0 +1,43 @@
+.reactor-fpv-hud {
+  --reactor-fpv-color: #8dff65;
+  --reactor-fpv-opacity: 1;
+  --reactor-fpv-scale: 1;
+  --reactor-fpv-roll: 0deg;
+  --reactor-fpv-pitch: 0px;
+  color: var(--reactor-fpv-color); opacity: var(--reactor-fpv-opacity);
+  position: fixed; inset: 0; overflow: hidden; pointer-events: none; user-select: none;
+  font-family: "Oswald", system-ui, sans-serif; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px #000, 0 0 5px #000;
+}
+.reactor-fpv-horizon { position: absolute; inset: 0; overflow: hidden; }
+.reactor-fpv-horizon-lines { position: absolute; left: -15%; top: 50%; width: 130%; height: 1px; background: var(--reactor-fpv-color); transform: translateY(var(--reactor-fpv-pitch)) rotate(var(--reactor-fpv-roll)) scale(var(--reactor-fpv-scale)); transform-origin: center; box-shadow: 0 -40px 0 -0.5px color-mix(in srgb, var(--reactor-fpv-color) 85%, transparent), 0 40px 0 -0.5px color-mix(in srgb, var(--reactor-fpv-color) 85%, transparent); }
+.reactor-fpv-horizon-lines i { position: absolute; left: 50%; width: 52px; height: 1px; background: var(--reactor-fpv-color); transform-origin: right; }
+.reactor-fpv-horizon-lines i:nth-child(1) { transform: rotate(-30deg) translateX(-60px); }
+.reactor-fpv-horizon-lines i:nth-child(2) { transform: rotate(-15deg) translateX(-43px); }
+.reactor-fpv-horizon-lines i:nth-child(3) { transform: rotate(15deg) translateX(43px); }
+.reactor-fpv-horizon-lines i:nth-child(4) { transform: rotate(30deg) translateX(60px); }
+.reactor-fpv-horizon-lines i:nth-child(5) { width: 110px; transform: translateX(-55px); }
+.reactor-fpv-crosshair { position: absolute; left: 50%; top: 50%; width: 86px; height: 42px; transform: translate(-50%, -50%) scale(var(--reactor-fpv-scale)); transform-origin: center; border-bottom: 2px solid var(--reactor-fpv-color); }
+.reactor-fpv-crosshair i, .reactor-fpv-crosshair b { position: absolute; top: 21px; height: 2px; background: var(--reactor-fpv-color); }
+.reactor-fpv-crosshair i { left: -25px; width: 43px; } .reactor-fpv-crosshair b { right: -25px; width: 43px; }
+.reactor-fpv-crosshair em { position: absolute; left: 50%; bottom: -11px; width: 0; height: 0; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 9px solid var(--reactor-fpv-color); }
+.reactor-fpv-value { position: absolute; display: grid; gap: 0; line-height: 1; letter-spacing: .045em; transform: scale(var(--reactor-fpv-scale)); }
+.reactor-fpv-value span { font-size: clamp(11px, 1vw, 17px); font-weight: 600; }
+.reactor-fpv-value strong { color: #fff; font-size: clamp(18px, 1.8vw, 31px); font-weight: 650; }
+.reactor-fpv-heading { top: max(3vh, 20px); left: 50%; text-align: center; transform: translateX(-50%) scale(var(--reactor-fpv-scale)); transform-origin: top center; }
+.reactor-fpv-speed { top: 42%; left: max(3vw, 24px); transform-origin: top left; } .reactor-fpv-altitude { top: 42%; right: max(3vw, 24px); text-align: right; transform-origin: top right; }
+.reactor-fpv-home { bottom: max(4vh, 28px); left: max(3vw, 24px); transform-origin: bottom left; } .reactor-fpv-timer { bottom: max(4vh, 28px); right: max(3vw, 24px); text-align: right; transform-origin: bottom right; }
+.reactor-fpv-flight-mode, .reactor-fpv-camera-mode, .reactor-fpv-payload { position: absolute; margin: 0; font-size: clamp(13px, 1.2vw, 21px); font-weight: 700; letter-spacing: .08em; }
+.reactor-fpv-flight-mode { left: 50%; bottom: max(5vh, 34px); transform: translateX(-50%) scale(var(--reactor-fpv-scale)); transform-origin: bottom center; } .reactor-fpv-camera-mode { left: max(3vw, 24px); top: max(4vh, 28px); transform: scale(var(--reactor-fpv-scale)); transform-origin: top left; }
+.reactor-fpv-payload { right: max(3vw, 24px); top: max(4vh, 28px); color: #fff; transform: scale(var(--reactor-fpv-scale)); transform-origin: top right; }
+.reactor-fpv-controls { position: absolute; left: 50%; bottom: max(9vh, 74px); display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; width: max-content; max-width: calc(100vw / var(--reactor-fpv-scale)); margin: 0; padding: 0; list-style: none; transform: translateX(-50%) scale(var(--reactor-fpv-scale)); transform-origin: bottom center; font-size: clamp(10px, .9vw, 15px); font-weight: 600; letter-spacing: .05em; }
+.reactor-fpv-controls li { white-space: nowrap; }
+.reactor-fpv-hud--compact .reactor-fpv-horizon { inset: 20% 25%; border: 1px solid color-mix(in srgb, var(--reactor-fpv-color) 60%, transparent); border-radius: 50%; }
+.reactor-fpv-hud--compact .reactor-fpv-speed { top: auto; bottom: max(4vh, 28px); left: 38%; transform-origin: bottom left; } .reactor-fpv-hud--compact .reactor-fpv-altitude { top: auto; bottom: max(4vh, 28px); right: 38%; transform-origin: bottom right; }
+.reactor-fpv-hud--compact .reactor-fpv-home { bottom: max(10vh, 68px); left: 30%; }
+.reactor-fpv-hud--compact .reactor-fpv-timer { bottom: max(10vh, 68px); right: 30%; }
+.reactor-fpv-hud--bomber .reactor-fpv-horizon { inset: 8% 19%; border: 1px solid color-mix(in srgb, var(--reactor-fpv-color) 55%, transparent); }
+.reactor-fpv-hud--bomber .reactor-fpv-crosshair { width: 128px; height: 128px; border: 1px solid var(--reactor-fpv-color); border-radius: 50%; }
+.reactor-fpv-hud--bomber .reactor-fpv-crosshair i, .reactor-fpv-hud--bomber .reactor-fpv-crosshair b { top: 63px; }
+.reactor-fpv-hud--bomber .reactor-fpv-payload { left: 50%; right: auto; top: auto; bottom: max(12vh, 90px); transform: translateX(-50%) scale(var(--reactor-fpv-scale)); transform-origin: bottom center; }
+@media (max-width: 700px) { .reactor-fpv-controls { gap: 8px; } .reactor-fpv-hud--compact .reactor-fpv-horizon { inset: 24% 12%; } }

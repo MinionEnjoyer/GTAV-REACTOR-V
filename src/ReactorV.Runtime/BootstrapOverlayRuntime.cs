@@ -33,14 +33,15 @@ namespace RageWebUI.Runtime
         private const int ContentRecoveryWaitMilliseconds = 5000;
         private const int HelloAcknowledgementWaitMilliseconds = 5000;
         private const int TeardownBudgetMilliseconds = 750;
+        private const int ReconnectInitialDelayMilliseconds = 100;
+        private const int ReconnectMaximumDelayMilliseconds = 2000;
 
         private readonly int _gtaProcessId;
         private readonly string _logDirectory;
         private readonly BridgeBroker _broker;
         private readonly bool _startVisible;
-        private readonly ConcurrentQueue<JObject> _outgoing = new ConcurrentQueue<JObject>();
+        private readonly ConcurrentQueue<QueuedFrame> _outgoing = new ConcurrentQueue<QueuedFrame>();
         private readonly AutoResetEvent _outgoingReady = new AutoResetEvent(false);
-        private readonly ManualResetEvent _stop = new ManualResetEvent(false);
         private readonly BootstrapAttachmentGate _attachmentGate =
             new BootstrapAttachmentGate();
         private readonly object _pointerSync = new object();
@@ -50,14 +51,22 @@ namespace RageWebUI.Runtime
         private NamedPipeClientStream? _pipe;
         private Thread? _reader;
         private Thread? _writer;
-        private JObject? _pendingPointerMove;
-        private readonly ConcurrentQueue<JObject> _pointerEdges = new ConcurrentQueue<JObject>();
+        private TransportSession? _activeSession;
+        // Every connected pipe owns one monotonically increasing session.
+        // Reader/writer finally blocks can outlive a broken connection, so
+        // they must prove ownership before mutating shared presentation state.
+        private long _transportGeneration;
+        private QueuedFrame? _pendingPointerMove;
+        private readonly ConcurrentQueue<QueuedFrame> _pointerEdges = new ConcurrentQueue<QueuedFrame>();
         private bool _hasCursor;
         private float _lastCursorX;
         private float _lastCursorY;
         private int _queuedFrames;
         private int _visible;
         private int _contentGeneration;
+        private int _hostContentGeneration;
+        private int _contentEpoch;
+        private long _readyTransportGeneration;
         private int _contentReady;
         private int _lastTracedContentGeneration;
         private int _lastTracedContentReady = -1;
@@ -69,12 +78,57 @@ namespace RageWebUI.Runtime
         private int _bootstrapSurfaceRetirementPending;
         private int _bootstrapSurfaceRetirementRequiresHidden;
         private int _runtimeReadyGeneration;
+        private int _runtimeReadyHostGeneration;
         private string? _runtimeReadyRequestId;
         private RuntimeReadyHandoffState _runtimeReadyState =
             RuntimeReadyHandoffState.Unavailable;
         private long _runtimeReadyRequestStartedAt;
         private int _disposed;
         private int _workerHandlesDisposed;
+        private int _reconnectScheduled;
+        private int _hasEverAttached;
+
+        private sealed class QueuedFrame
+        {
+            public QueuedFrame(long transportGeneration, JObject frame)
+            {
+                TransportGeneration = transportGeneration;
+                Frame = frame;
+            }
+
+            public long TransportGeneration { get; }
+            public JObject Frame { get; }
+        }
+
+        private sealed class TransportSession : IDisposable
+        {
+            private int _disposed;
+
+            public TransportSession(NamedPipeClientStream pipe, long generation)
+            {
+                Pipe = pipe;
+                Generation = generation;
+            }
+
+            public NamedPipeClientStream Pipe { get; }
+            public long Generation { get; }
+            public ManualResetEvent Stop { get; } = new ManualResetEvent(false);
+            public Thread? Reader { get; set; }
+            public Thread? Writer { get; set; }
+
+            public void Abort()
+            {
+                Stop.Set();
+                BootstrapHostWire.AbortOwnedStream(Pipe);
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                Abort();
+                Stop.Dispose();
+            }
+        }
 
         public BootstrapOverlayRuntime(
             int gtaProcessId,
@@ -219,8 +273,9 @@ namespace RageWebUI.Runtime
                 return RuntimeReadyHandoffState.Unavailable;
 
             var currentGeneration = Volatile.Read(ref _contentGeneration);
+            var hostGeneration = Volatile.Read(ref _hostContentGeneration);
             if (Volatile.Read(ref _contentReady) != 1 ||
-                currentGeneration != expectedContentGeneration)
+                currentGeneration != expectedContentGeneration || hostGeneration <= 0)
                 return RuntimeReadyHandoffState.StaleGeneration;
 
             JObject? request = null;
@@ -244,12 +299,13 @@ namespace RageWebUI.Runtime
                 else
                 {
                     _runtimeReadyGeneration = expectedContentGeneration;
+                    _runtimeReadyHostGeneration = hostGeneration;
                     _runtimeReadyRequestId = Guid.NewGuid().ToString("N");
                     _runtimeReadyState = RuntimeReadyHandoffState.Pending;
                     _runtimeReadyRequestStartedAt = Stopwatch.GetTimestamp();
                     state = _runtimeReadyState;
                     request = BootstrapHostHandshake.CreateRuntimeReadyLeaseRequest(
-                        expectedContentGeneration,
+                        hostGeneration,
                         _runtimeReadyRequestId);
                 }
             }
@@ -281,8 +337,24 @@ namespace RageWebUI.Runtime
                     _pipe?.IsConnected == true);
         }
 
+        private int NextLocalContentGeneration()
+        {
+            var next = Interlocked.Increment(ref _contentEpoch);
+            if (next <= 0)
+            {
+                // An int epoch cannot practically wrap during a process
+                // lifetime; fail closed if it ever does rather than reuse a
+                // readiness token which Script could mistake as current.
+                throw new InvalidOperationException("Bootstrap content epoch overflowed.");
+            }
+            return next;
+        }
+
         private bool StartCore()
         {
+            if (Volatile.Read(ref _disposed) != 0) return false;
+            if (!RetirePreviousTransportForReconnect())
+                return false;
             if (Volatile.Read(ref _disposed) != 0) return false;
             NamedPipeClientStream? pipe = null;
             try
@@ -307,7 +379,6 @@ namespace RageWebUI.Runtime
                     // Match the host's overlapped handle so the proxy reader
                     // cannot block its independent writer on the same stream.
                     PipeOptions.Asynchronous);
-                _pipe = pipe;
                 pipe.Connect(500);
                 if (!GetNamedPipeServerProcessId(
                         pipe.SafePipeHandle,
@@ -327,6 +398,10 @@ namespace RageWebUI.Runtime
                     pipe,
                     BootstrapHostHandshake.CreateHello(_gtaProcessId),
                     HelloAcknowledgementWaitMilliseconds);
+                // The host owns the other end of this pipe.  A stalled or
+                // abandoned peer must not pin the script thread indefinitely;
+                // the catch path closes our owned handle, which unblocks the
+                // native async read before a later Start retry.
                 var acknowledgement = BootstrapHostWire.Read(
                     pipe,
                     RemainingHandshakeMilliseconds(handshakeDeadline));
@@ -341,21 +416,31 @@ namespace RageWebUI.Runtime
                 if (!contentReady)
                     throw new InvalidOperationException(
                         "The bootstrap WebView content generation is not ready.");
-                Interlocked.Exchange(ref _contentGeneration, contentGeneration);
+                Interlocked.Exchange(ref _hostContentGeneration, contentGeneration);
+                var localGeneration = NextLocalContentGeneration();
+                Interlocked.Exchange(ref _contentGeneration, localGeneration);
                 Interlocked.Exchange(ref _contentReady, 1);
-                _lastTracedContentGeneration = contentGeneration;
+                _lastTracedContentGeneration = localGeneration;
                 _lastTracedContentReady = 1;
                 lock (_workerStartSync)
                 {
                     if (Volatile.Read(ref _disposed) != 0)
                         throw new OperationCanceledException(
                             "The bootstrap runtime was disposed while attaching.");
-                    _writer = new Thread(WriterLoop)
+                    // Publish the pipe only once the handshake has completed.
+                    // This prevents a prior reader from treating the new pipe
+                    // as its own during a reconnect race.
+                    var transportGeneration = checked(++_transportGeneration);
+                    var session = new TransportSession(pipe, transportGeneration);
+                    _pipe = pipe;
+                    _activeSession = session;
+                    Volatile.Write(ref _readyTransportGeneration, transportGeneration);
+                    _writer = session.Writer = new Thread(() => WriterLoop(session))
                     {
                         IsBackground = true,
                         Name = "REACTOR V bootstrap proxy writer",
                     };
-                    _reader = new Thread(ReaderLoop)
+                    _reader = session.Reader = new Thread(() => ReaderLoop(session))
                     {
                         IsBackground = true,
                         Name = "REACTOR V bootstrap proxy reader",
@@ -363,13 +448,13 @@ namespace RageWebUI.Runtime
                     _writer.Start();
                     _reader.Start();
                 }
-                if (_startVisible)
+                if (_startVisible && Interlocked.Exchange(ref _hasEverAttached, 1) == 0)
                     SetVisible(true);
                 RuntimeTrace.Write(
                     _logDirectory,
                     "bootstrap_host_attached",
                     $"pid={_gtaProcessId} host_pid={hostProcessId} " +
-                    $"generation={contentGeneration} " +
+                    $"generation={contentGeneration} local_generation={localGeneration} " +
                     $"pipe={BootstrapHostNames.Pipe(_gtaProcessId)}");
                 return true;
             }
@@ -437,6 +522,10 @@ namespace RageWebUI.Runtime
 
         public void PumpInput()
         {
+            // This is called from the GTA tick. Never run a pipe handshake on
+            // that thread: recovery is owned by a single ThreadPool worker.
+            if (Volatile.Read(ref _disposed) == 0 && _pipe?.IsConnected != true)
+                ScheduleReconnect();
         }
 
         public void UpdateCursor(
@@ -476,6 +565,11 @@ namespace RageWebUI.Runtime
                     ["released"] = released,
                     ["wheel"] = wheelDelta,
                 };
+                var queuedFrame = CreateQueuedFrame(frame);
+                // Offline pointer data belongs to the retired presentation;
+                // Script will provide a fresh cursor/input intent once the
+                // replacement provider reports ready.
+                if (queuedFrame == null) return;
                 if (pressed || released || wheelDelta != 0)
                 {
                     if (_pendingPointerMove != null)
@@ -483,11 +577,11 @@ namespace RageWebUI.Runtime
                         _pointerEdges.Enqueue(_pendingPointerMove);
                         _pendingPointerMove = null;
                     }
-                    _pointerEdges.Enqueue(frame);
+                    _pointerEdges.Enqueue(queuedFrame);
                 }
                 else
                 {
-                    _pendingPointerMove = frame;
+                    _pendingPointerMove = queuedFrame;
                 }
             }
             _outgoingReady.Set();
@@ -507,9 +601,9 @@ namespace RageWebUI.Runtime
             // one last synchronous write here: if the peer is already gone or
             // its read loop is unwinding, that write can indefinitely hold the
             // shared write lock and hang SHVDN AppDomain teardown.
-            _stop.Set();
             _outgoingReady.Set();
-            BootstrapHostWire.AbortOwnedStream(_pipe!);
+            var session = Volatile.Read(ref _activeSession);
+            session?.Abort();
             lock (_workerStartSync)
             {
                 // An attachment may have been racing Dispose. The lock makes
@@ -517,12 +611,14 @@ namespace RageWebUI.Runtime
                 // rejected before either worker can start.
             }
             var teardown = Stopwatch.StartNew();
-            JoinWithinBudget(_reader, teardown);
-            JoinWithinBudget(_writer, teardown);
+            JoinWithinBudget(session?.Reader, teardown);
+            JoinWithinBudget(session?.Writer, teardown);
             _pipe = null;
+            _activeSession = null;
             Interlocked.Exchange(ref _hostProcessId, 0);
-            if (_reader?.IsAlive != true && _writer?.IsAlive != true)
+            if (session?.Reader?.IsAlive != true && session?.Writer?.IsAlive != true)
             {
+                session?.Dispose();
                 DisposeWorkerHandles();
             }
             else
@@ -532,8 +628,9 @@ namespace RageWebUI.Runtime
                 // background thread after both workers have actually exited.
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    try { _reader?.Join(); } catch { }
-                    try { _writer?.Join(); } catch { }
+                    try { session?.Reader?.Join(); } catch { }
+                    try { session?.Writer?.Join(); } catch { }
+                    session?.Dispose();
                     DisposeWorkerHandles();
                 });
             }
@@ -556,7 +653,6 @@ namespace RageWebUI.Runtime
         {
             if (Interlocked.Exchange(ref _workerHandlesDisposed, 1) != 0) return;
             _outgoingReady.Dispose();
-            _stop.Dispose();
         }
 
         private void PostJson(string json)
@@ -570,16 +666,106 @@ namespace RageWebUI.Runtime
             });
         }
 
-        private void ReaderLoop()
+        private bool RetirePreviousTransportForReconnect()
+        {
+            TransportSession? previous;
+            lock (_workerStartSync)
+            {
+                previous = _activeSession;
+                // Closing the owned pipe releases any read/write blocked on a
+                // departed server. Do this before a replacement is visible.
+                previous?.Abort();
+            }
+            var teardown = Stopwatch.StartNew();
+            JoinWithinBudget(previous?.Reader, teardown);
+            JoinWithinBudget(previous?.Writer, teardown);
+            if (previous?.Reader?.IsAlive == true || previous?.Writer?.IsAlive == true)
+            {
+                RuntimeTrace.Write(
+                    _logDirectory,
+                    "bootstrap_host_reconnect_deferred",
+                    $"pid={_gtaProcessId} timeout_ms={TeardownBudgetMilliseconds}");
+                return false;
+            }
+            lock (_workerStartSync)
+            {
+                if (ReferenceEquals(_activeSession, previous))
+                {
+                    _pipe = null;
+                    _reader = null;
+                    _writer = null;
+                    _activeSession = null;
+                }
+            }
+            previous?.Dispose();
+            return true;
+        }
+
+        private bool IsCurrentTransport(TransportSession session) =>
+            session.Generation == Volatile.Read(ref _transportGeneration) &&
+            ReferenceEquals(_activeSession, session) &&
+            ReferenceEquals(_pipe, session.Pipe);
+
+        private void ScheduleReconnect()
+        {
+            if (Volatile.Read(ref _disposed) != 0 ||
+                _pipe?.IsConnected == true ||
+                Interlocked.Exchange(ref _reconnectScheduled, 1) != 0)
+                return;
+            ThreadPool.QueueUserWorkItem(_ => ReconnectLoop());
+        }
+
+        private void ReconnectLoop()
+        {
+            var delay = ReconnectInitialDelayMilliseconds;
+            try
+            {
+                while (Volatile.Read(ref _disposed) == 0 &&
+                    _pipe?.IsConnected != true)
+                {
+                    // The initial retry is delayed too: it gives an exiting
+                    // host/server loop a chance to release its pipe instance
+                    // and keeps recovery off the GTA lifecycle thread.
+                    Thread.Sleep(delay);
+                    if (Volatile.Read(ref _disposed) != 0 ||
+                        _pipe?.IsConnected == true)
+                        return;
+                    if (Start())
+                    {
+                        RuntimeTrace.Write(
+                            _logDirectory,
+                            "bootstrap_host_reconnected",
+                            $"pid={_gtaProcessId} generation={Volatile.Read(ref _contentGeneration)}");
+                        return;
+                    }
+                    delay = Math.Min(ReconnectMaximumDelayMilliseconds, delay * 2);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _reconnectScheduled, 0);
+                // If a detach raced the final health check, retain autonomous
+                // recovery without making a lifecycle/telemetry poll decide
+                // whether recovery is necessary.
+                if (Volatile.Read(ref _disposed) == 0 && _pipe?.IsConnected != true)
+                    ScheduleReconnect();
+            }
+        }
+
+        private void ReaderLoop(TransportSession session)
         {
             try
             {
                 RuntimeTrace.Write(_logDirectory, "bootstrap_host_reader_started", $"pid={_gtaProcessId}");
-                var pipe = _pipe;
-                while (Volatile.Read(ref _disposed) == 0 && pipe?.IsConnected == true)
+                while (Volatile.Read(ref _disposed) == 0 &&
+                    IsCurrentTransport(session) && session.Pipe.IsConnected)
                 {
-                    var message = BootstrapHostWire.Read(pipe);
+                    var message = BootstrapHostWire.Read(session.Pipe);
                     if (message == null) break;
+                    // A disconnect can race a completed read. Do not let a
+                    // buffered state/lease/web frame from the retired pipe
+                    // mutate the replacement session.
+                    if (!IsCurrentTransport(session)) break;
                     if (string.Equals(message.Value<string>("type"), "state", StringComparison.Ordinal))
                     {
                         var visible = message.Value<bool>("visible");
@@ -626,19 +812,38 @@ namespace RageWebUI.Runtime
                                     ref _bootstrapSurfaceRetirementPending,
                                     0);
                             }
-                            Interlocked.Exchange(ref _contentGeneration, generation);
+                            var previousHostGeneration = Volatile.Read(
+                                ref _hostContentGeneration);
+                            var becameReadyForSession = ready &&
+                                Volatile.Read(ref _readyTransportGeneration) !=
+                                session.Generation;
+                            var hostGenerationChanged = ready &&
+                                previousHostGeneration != generation;
+                            Interlocked.Exchange(ref _hostContentGeneration, generation);
+                            if (becameReadyForSession || hostGenerationChanged)
+                            {
+                                var localGeneration = NextLocalContentGeneration();
+                                Interlocked.Exchange(
+                                    ref _contentGeneration, localGeneration);
+                                Volatile.Write(
+                                    ref _readyTransportGeneration,
+                                    session.Generation);
+                            }
                             var readyValue = ready ? 1 : 0;
                             Interlocked.Exchange(ref _contentReady, readyValue);
-                            InvalidatePendingRuntimeReadyLease(generation, ready);
-                            if (generation != _lastTracedContentGeneration ||
+                            InvalidatePendingRuntimeReadyLease(
+                                Volatile.Read(ref _contentGeneration), ready);
+                            var localGenerationForTrace = Volatile.Read(
+                                ref _contentGeneration);
+                            if (localGenerationForTrace != _lastTracedContentGeneration ||
                                 readyValue != _lastTracedContentReady)
                             {
-                                _lastTracedContentGeneration = generation;
+                                _lastTracedContentGeneration = localGenerationForTrace;
                                 _lastTracedContentReady = readyValue;
                                 RuntimeTrace.Write(
                                     _logDirectory,
                                     ready ? "bootstrap_host_generation_ready" : "bootstrap_host_generation_not_ready",
-                                    $"generation={generation}");
+                                    $"generation={generation} local_generation={localGenerationForTrace}");
                             }
                         }
                         continue;
@@ -683,21 +888,35 @@ namespace RageWebUI.Runtime
             }
             finally
             {
-                Interlocked.Exchange(ref _visible, 0);
-                Interlocked.Exchange(ref _contentReady, 0);
-                Interlocked.Exchange(ref _hostSurfaceMode, HostSurfaceMode.None);
-                Interlocked.Exchange(ref _committedProviderPresentationId, null);
-                Interlocked.Exchange(ref _verifiedHostSurface, null);
-                Interlocked.Exchange(
-                    ref _userIntentAuthorizedProviderPresentationId,
-                    null);
-                Interlocked.Exchange(ref _bootstrapSurfaceRetirementPending, 0);
-                InvalidatePendingRuntimeReadyLease(
-                    Volatile.Read(ref _contentGeneration),
-                    ready: false);
-                _stop.Set();
-                _outgoingReady.Set();
+                // A stale reader from a retired session must never clear the
+                // state established by a newer successful reconnect.
+                if (MarkTransportUnavailable(session))
+                    ScheduleReconnect();
             }
+        }
+
+        private bool MarkTransportUnavailable(TransportSession session)
+        {
+            if (!IsCurrentTransport(session)) return false;
+            Interlocked.Exchange(ref _visible, 0);
+            Interlocked.Exchange(ref _contentReady, 0);
+            Interlocked.Exchange(ref _hostSurfaceMode, HostSurfaceMode.None);
+            Interlocked.Exchange(ref _committedProviderPresentationId, null);
+            Interlocked.Exchange(ref _verifiedHostSurface, null);
+            Interlocked.Exchange(ref _userIntentAuthorizedProviderPresentationId, null);
+            Interlocked.Exchange(ref _bootstrapSurfaceRetirementPending, 0);
+            InvalidatePendingRuntimeReadyLease(
+                Volatile.Read(ref _contentGeneration), ready: false);
+            lock (_workerStartSync)
+            {
+                if (!IsCurrentTransport(session)) return false;
+                _pipe = null;
+            }
+            ClearQueuedFrames();
+            session.Abort();
+            Interlocked.Exchange(ref _hostProcessId, 0);
+            _outgoingReady.Set();
+            return true;
         }
 
         private void ObserveRuntimeReadyLeaseAcknowledgement(JObject message)
@@ -720,7 +939,7 @@ namespace RageWebUI.Runtime
             lock (_runtimeReadySync)
             {
                 if (_runtimeReadyState != RuntimeReadyHandoffState.Pending ||
-                    generation != _runtimeReadyGeneration ||
+                    generation != _runtimeReadyHostGeneration ||
                     !string.Equals(
                         requestId,
                         _runtimeReadyRequestId,
@@ -759,20 +978,22 @@ namespace RageWebUI.Runtime
             }
         }
 
-        private void WriterLoop()
+        private void WriterLoop(TransportSession session)
         {
             try
             {
                 RuntimeTrace.Write(_logDirectory, "bootstrap_host_writer_started", $"pid={_gtaProcessId}");
-                var pipe = _pipe;
-                while (Volatile.Read(ref _disposed) == 0 && pipe?.IsConnected == true)
+                while (Volatile.Read(ref _disposed) == 0 &&
+                    IsCurrentTransport(session) && session.Pipe.IsConnected)
                 {
                     while (_outgoing.TryDequeue(out var frame))
                     {
                         Interlocked.Decrement(ref _queuedFrames);
-                        WriteFrame(pipe, frame);
+                        if (frame.TransportGeneration == session.Generation &&
+                            IsCurrentTransport(session))
+                            WriteFrame(session.Pipe, frame.Frame);
                     }
-                    JObject[] pointerFrames;
+                    QueuedFrame[] pointerFrames;
                     lock (_pointerSync)
                     {
                         if (_pendingPointerMove != null)
@@ -783,8 +1004,13 @@ namespace RageWebUI.Runtime
                         pointerFrames = _pointerEdges.ToArray();
                         while (_pointerEdges.TryDequeue(out _)) { }
                     }
-                    foreach (var frame in pointerFrames) WriteFrame(pipe, frame);
-                    if (_stop.WaitOne(0)) return;
+                    foreach (var frame in pointerFrames)
+                    {
+                        if (frame.TransportGeneration == session.Generation &&
+                            IsCurrentTransport(session))
+                            WriteFrame(session.Pipe, frame.Frame);
+                    }
+                    if (session.Stop.WaitOne(0)) return;
                     _outgoingReady.WaitOne(16);
                 }
             }
@@ -798,20 +1024,44 @@ namespace RageWebUI.Runtime
                     _logDirectory,
                     "bootstrap_host_writer_stopped",
                     $"type={error.GetType().Name} message={error.Message}");
+                if (MarkTransportUnavailable(session))
+                    ScheduleReconnect();
             }
         }
 
         private void QueueFrame(JObject frame)
         {
             if (Volatile.Read(ref _disposed) != 0) return;
+            var queued = CreateQueuedFrame(frame);
+            if (queued == null) return;
             var count = Interlocked.Increment(ref _queuedFrames);
-            _outgoing.Enqueue(frame);
+            _outgoing.Enqueue(queued);
             while (count > MaximumQueuedFrames && _outgoing.TryDequeue(out _))
             {
                 count = Interlocked.Decrement(ref _queuedFrames);
                 RuntimeTrace.Write(_logDirectory, "bootstrap_proxy_frame_dropped", $"maximum={MaximumQueuedFrames}");
             }
             _outgoingReady.Set();
+        }
+
+        private QueuedFrame? CreateQueuedFrame(JObject frame)
+        {
+            var session = Volatile.Read(ref _activeSession);
+            if (session == null || !IsCurrentTransport(session) ||
+                !session.Pipe.IsConnected)
+                return null;
+            return new QueuedFrame(session.Generation, frame);
+        }
+
+        private void ClearQueuedFrames()
+        {
+            while (_outgoing.TryDequeue(out _))
+                Interlocked.Decrement(ref _queuedFrames);
+            lock (_pointerSync)
+            {
+                _pendingPointerMove = null;
+                while (_pointerEdges.TryDequeue(out _)) { }
+            }
         }
 
         private void WriteFrame(Stream pipe, JObject frame)

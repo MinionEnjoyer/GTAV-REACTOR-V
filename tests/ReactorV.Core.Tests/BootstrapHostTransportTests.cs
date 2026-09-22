@@ -206,6 +206,45 @@ namespace RageWebUI.Core.Tests
 
         [Fact]
         [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public async Task A_closed_provider_pipe_can_reconnect_and_complete_a_fresh_handshake()
+        {
+            var name = "ReactorV.ReconnectWire." + Guid.NewGuid().ToString("N");
+            for (var generation = 1; generation <= 2; generation++)
+            {
+                using var server = new NamedPipeServerStream(
+                    name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous);
+                using var client = new NamedPipeClientStream(
+                    ".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
+                var connected = server.WaitForConnectionAsync();
+                await client.ConnectAsync(2000);
+                await connected;
+
+                var serverHandshake = Task.Run(() =>
+                {
+                    var hello = BootstrapHostWire.Read(server);
+                    Assert.True(BootstrapHostHandshake.TryValidateHello(
+                        hello, 4242, out var failure), failure);
+                    BootstrapHostWire.Write(server,
+                        BootstrapHostHandshake.CreateReadyAcknowledgement(
+                            generation, true));
+                });
+                BootstrapHostWire.Write(client, BootstrapHostHandshake.CreateHello(4242));
+                var acknowledgement = BootstrapHostWire.Read(client, 1000);
+                await serverHandshake.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.True(BootstrapHostHandshake.TryValidateReadyAcknowledgement(
+                    acknowledgement, out var acknowledgedGeneration, out var ready, out var failure),
+                    failure);
+                Assert.Equal(generation, acknowledgedGeneration);
+                Assert.True(ready);
+                // Both handles leave scope here, forcing the next iteration
+                // to establish a new connection rather than reuse state from
+                // the just-closed transport.
+            }
+        }
+
+        [Fact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
         public async Task Bounded_wire_read_times_out_and_pipe_disposal_unblocks_a_never_acknowledging_peer()
         {
             var name = "ReactorV.BoundedWire." + Guid.NewGuid().ToString("N");

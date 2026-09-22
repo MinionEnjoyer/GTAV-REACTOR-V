@@ -26,6 +26,7 @@ namespace RageWebUI.Script
         private const int StoryModeBackgroundPollMilliseconds = 250;
         private const int ToggleDebounceMilliseconds = 250;
         private const int ManagedStartupStatusRefreshMilliseconds = 500;
+        private const int MaximumDelayedPresentationRecoveryAttempts = 1;
 
         private readonly BridgeBroker _broker;
         private readonly IOverlayRuntime _overlay;
@@ -87,6 +88,13 @@ namespace RageWebUI.Script
         private long _boundProviderInputIntentEpoch;
         private string? _boundProviderInputIntentPresentationId;
         private string? _userIntentFallbackPresentationId;
+        // Retain only the typed payload for the exact registry generation
+        // currently owned by this script. A browser recovery requires a new
+        // paint acknowledgement for that same generation; it is not a new
+        // extension request and must never mint a fresh input intent.
+        private JObject? _recoverableMenuPresentation;
+        private bool _delayedMenuPresentationRecoveryPending;
+        private int _delayedMenuPresentationRecoveryAttempts;
 
         public RageWebUiScript()
         {
@@ -265,6 +273,7 @@ namespace RageWebUI.Script
             {
                 DrainMenuDismissals();
                 DrainMenuPresentations();
+                RecoverDelayedMenuPresentation();
             }
             TryAdvancePendingProviderPresentation(scriptElapsedMilliseconds);
             DrainExtensionEvents();
@@ -279,13 +288,19 @@ namespace RageWebUI.Script
 
             if (_menuRevealGate.TryExpire(scriptElapsedMilliseconds, out var expiredPresentationId))
             {
-                var aborted = AbortPresentationTransfer(
+                var recovered = ScheduleDelayedPresentationRecovery(
                     expiredPresentationId,
                     "presentation-ready-timeout");
-                TraceRuntime(
-                    "menu_presentation_ready_timeout",
-                    $"presentation={expiredPresentationId} timeout_ms={MenuRevealGate.DefaultTimeoutMilliseconds} " +
-                    $"game_time={Game.GameTime} fail_closed=true exact_abort={aborted}");
+                if (!recovered)
+                {
+                    var aborted = AbortPresentationTransfer(
+                        expiredPresentationId,
+                        "presentation-ready-timeout");
+                    TraceRuntime(
+                        "menu_presentation_ready_timeout",
+                        $"presentation={expiredPresentationId} timeout_ms={MenuRevealGate.DefaultTimeoutMilliseconds} " +
+                        $"game_time={Game.GameTime} fail_closed=true exact_abort={aborted}");
+                }
             }
 
             if (_providerPresentationCommitGate.TryExpire(
@@ -708,6 +723,11 @@ namespace RageWebUI.Script
             CancelStartupIntentIfActive(reason);
             _menuRevealGate.Cancel();
             CancelPendingProviderPresentation(reason);
+            // A caller can close while the registry callback is delayed or
+            // unavailable. Clear this script-local replay authority now; the
+            // later acknowledgement is only bookkeeping and cannot resurrect
+            // an intentionally closed surface.
+            ClearRecoverableMenuPresentation(expectedPresentationId);
             // An explicit close owns dismissal immediately. Do not let a
             // preparation token survive while the host is already hidden and
             // suppress a later, unrelated close edge.
@@ -738,16 +758,19 @@ namespace RageWebUI.Script
             }
             _overlayRequestedVisible = false;
             _inputMode = MenuPresentationPolicy.HiddenInputMode;
-            // The process-separated bootstrap host authors one generation-
-            // bound host.surface=none when this visibility request reaches it.
-            // Sending an unversioned browser event as well caused two reset
-            // pulses per close. In-process fallback renderers still need the
-            // direct event because they have no authoritative host boundary.
+            // The process-separated bootstrap host authors its own
+            // generation-bound close. In-process fallback renderers still
+            // need a direct, likewise generation-bound reset because their
+            // browser stale-message guard rejects unversioned host.surface.
             if (!HasAuthoritativeHostSurfaceBoundary())
             {
                 _overlay.PostEvent(
                     "host.surface",
-                    new JObject { ["mode"] = "none" });
+                    new JObject
+                    {
+                        ["mode"] = HostSurfaceMode.None,
+                        ["generation"] = NextHostSurfaceGeneration(),
+                    });
             }
             _overlay.SetVisible(false);
             // The registry retains a dismissal-requested generation until the
@@ -808,10 +831,14 @@ namespace RageWebUI.Script
 
         private int NextHostSurfaceGeneration()
         {
-            _hostSurfaceGeneration = _hostSurfaceGeneration == int.MaxValue
-                ? 1
-                : _hostSurfaceGeneration + 1;
-            return _hostSurfaceGeneration;
+            // A reused value can be accepted as a stale host.surface command
+            // after a long-lived renderer reconnect. The wire contract is an
+            // Int32 today, so exhaust it fail-closed instead of wrapping to a
+            // generation an existing host may still remember.
+            if (_hostSurfaceGeneration == int.MaxValue)
+                throw new InvalidOperationException(
+                    "Host-surface generation space is exhausted.");
+            return ++_hostSurfaceGeneration;
         }
 
         private void UpdateStoryModeReadiness()
@@ -1271,10 +1298,29 @@ namespace RageWebUI.Script
                 return;
             }
 
+            var contentGenerationChanged =
+                _browserContentGeneration != contentGeneration;
+            if (contentGenerationChanged && _browserContentGeneration != 0)
+            {
+                // A fast bootstrap reconnect can advance directly from one
+                // ready generation to another without an observable
+                // unavailable tick. Its old document cannot retain a paint
+                // gate, provider-input authority, or RuntimeReady lease.
+                _menuRevealGate.Cancel();
+                CancelPendingProviderPresentation(
+                    "browser-generation-replaced");
+                _runtimeReadyHandoffAttempted = false;
+                _inputMode = MenuPresentationPolicy.HiddenInputMode;
+            }
             if (_browserContentGeneration != contentGeneration)
                 _runtimeReadyLeaseRequested = false;
             _browserReady = true;
             _browserContentGeneration = contentGeneration;
+            if (contentGenerationChanged && _recoverableMenuPresentation != null)
+            {
+                _delayedMenuPresentationRecoveryAttempts = 0;
+                _delayedMenuPresentationRecoveryPending = true;
+            }
             ReactorHostApi.NotifyLifecycle(
                 ReactorLifecycleStage.BrowserReady,
                 new JObject { ["gameTime"] = Game.GameTime });
@@ -1283,6 +1329,14 @@ namespace RageWebUI.Script
                 "browser_ready",
                 $"source={source} generation={contentGeneration} game_time={Game.GameTime} " +
                 $"script_elapsed_ms={_scriptTimer.Elapsed.TotalMilliseconds:F3}");
+            if (_delayedMenuPresentationRecoveryPending)
+            {
+                TraceRuntime(
+                    "menu_presentation_recovery_scheduled",
+                    $"presentation={_recoverableMenuPresentation?.Value<string>("presentationId") ?? "none"} " +
+                    $"source={source} generation={contentGeneration} " +
+                    "trigger=browser-ready telemetry_independent=true");
+            }
             TryCompleteRuntimeReadyHandoff();
         }
 
@@ -1304,7 +1358,18 @@ namespace RageWebUI.Script
                 "browser_generation_invalidated",
                 $"previous_generation={_browserContentGeneration} " +
                 $"runtime_ready_handoff_attempted={_runtimeReadyHandoffAttempted}");
+            // This is a renderer/document failure rather than an extension
+            // close. Cancel both phases of the old paint proof and let the
+            // next browser-ready lifecycle edge re-arm the same exact menu.
+            _menuRevealGate.Cancel();
             CancelPendingProviderPresentation("browser-generation-invalidated");
+            if (_recoverableMenuPresentation != null)
+                _delayedMenuPresentationRecoveryPending = true;
+            // Bootstrap owns the content-generation lease. A reconnect has a
+            // new generation and therefore needs a new RuntimeReady advance;
+            // otherwise the script would keep believing an old lease covered
+            // the recovered host.
+            _runtimeReadyHandoffAttempted = false;
             _inputMode = MenuPresentationPolicy.HiddenInputMode;
             _browserReady = false;
             _browserContentGeneration = 0;
@@ -1419,7 +1484,11 @@ namespace RageWebUI.Script
             {
                 _overlay.PostEvent(
                     "host.surface",
-                    new JObject { ["mode"] = "none" });
+                    new JObject
+                    {
+                        ["mode"] = HostSurfaceMode.None,
+                        ["generation"] = NextHostSurfaceGeneration(),
+                    });
                 _overlay.SetVisible(false);
             }
             TraceRuntime(
@@ -1442,7 +1511,11 @@ namespace RageWebUI.Script
             else
                 _overlay.PostEvent(
                     "host.surface",
-                    new JObject { ["mode"] = "none" });
+                    new JObject
+                    {
+                        ["mode"] = HostSurfaceMode.None,
+                        ["generation"] = NextHostSurfaceGeneration(),
+                    });
 
             TraceRuntime(
                 "bootstrap_surface_superseded",
@@ -1666,6 +1739,9 @@ namespace RageWebUI.Script
                 // phase; interactive-menu mode starts only after the host
                 // proves that same presentation reached provider pixels.
                 _inputMode = MenuPresentationPolicy.PendingPresentationInputMode;
+                _recoverableMenuPresentation = (JObject)payload.DeepClone();
+                _delayedMenuPresentationRecoveryPending = false;
+                _delayedMenuPresentationRecoveryAttempts = 0;
                 // The current committed frame remains visible while React
                 // prepares its replacement. Browser layout acknowledgement
                 // and exact provider-paint proof both precede input activation.
@@ -1690,6 +1766,8 @@ namespace RageWebUI.Script
                     var cancelled = ReactorHostApi.TakeActiveMenuPresentation();
                     if (cancelled != null)
                     {
+                        ClearRecoverableMenuPresentation(
+                            cancelled.Value<string>("presentationId"));
                         cancelled["reason"] = "startup-intent-cancelled";
                         PostCoreEvent(
                             MenuPresentationPolicy.DismissedEventName,
@@ -1711,6 +1789,134 @@ namespace RageWebUI.Script
                     $"input_mode={_inputMode} " +
                     $"game_time={Game.GameTime}");
             }
+        }
+
+        /// <summary>
+        /// Replays one still-active menu after its browser document became
+        /// ready again. This deliberately runs from the script lifecycle,
+        /// before ordinary telemetry publishing, so recovery is not coupled
+        /// to a game-state cadence or an overlay-visible edge.
+        /// </summary>
+        private void RecoverDelayedMenuPresentation()
+        {
+            if (!_delayedMenuPresentationRecoveryPending ||
+                _recoverableMenuPresentation == null)
+                return;
+
+            var presentationId =
+                _recoverableMenuPresentation.Value<string>("presentationId");
+            if (!MenuPresentationPolicy.IsValidPresentationId(presentationId) ||
+                !ReactorHostApi.CanMarkMenuPresentationReady(presentationId!))
+            {
+                // An explicit close, dismissal, or replacement won while the
+                // document was unavailable. Never resurrect it.
+                ClearRecoverableMenuPresentation(presentationId);
+                return;
+            }
+
+            var presentationTransferPending =
+                _menuRevealGate.PendingPresentationId != null ||
+                _providerPresentationCommitGate.PendingPresentationId != null;
+            if (!MenuPresentationPolicy.ShouldRecoverDelayedPresentation(
+                    _storyModeReady,
+                    _browserReady,
+                    _overlayRequestedVisible,
+                    Game.IsPaused,
+                    hasExactActivePresentation: true,
+                    presentationTransferPending: presentationTransferPending))
+            {
+                return;
+            }
+
+            // A recovered document must receive a new registry identity. Do
+            // not re-arm the old token: its failed document can still deliver
+            // a delayed acknowledgement through the bridge after recovery.
+            if (!ReactorHostApi.TryRestartActiveMenuPresentation(
+                    presentationId!,
+                    _recoverableMenuPresentation.Value<JObject>("context") ??
+                        new JObject(),
+                    out var retired,
+                    out var replacement) || replacement == null)
+            {
+                ClearRecoverableMenuPresentation(presentationId);
+                return;
+            }
+
+            _recoverableMenuPresentation = replacement;
+            var replacementPresentationId =
+                replacement.Value<string>("presentationId")!;
+            // The retired UUID may still own a bounded provider input intent.
+            // Revoke only that exact authority; recovery never mints a new
+            // user intent, and the replacement still waits for normal paint
+            // proof before interactive input can be acquired.
+            RevokeProviderPresentationInputIntent(
+                presentationId,
+                "presentation-recovery-restarted");
+            if (retired != null)
+            {
+                retired["reason"] = "superseded";
+                PostCoreEvent(MenuPresentationPolicy.DismissedEventName, retired);
+            }
+
+            _inputMode = MenuPresentationPolicy.PendingPresentationInputMode;
+            _menuRevealGate.Begin(
+                replacementPresentationId,
+                _scriptTimer.ElapsedMilliseconds);
+            _delayedMenuPresentationRecoveryPending = false;
+            PostCoreEvent(
+                MenuPresentationPolicy.EventName,
+                _recoverableMenuPresentation.DeepClone());
+            TraceRuntime(
+                "menu_presentation_recovery_dispatched",
+                $"retired_presentation={presentationId} " +
+                $"presentation={replacementPresentationId} trigger=lifecycle " +
+                "telemetry_independent=true input_mode=game");
+        }
+
+        private bool ScheduleDelayedPresentationRecovery(
+            string? presentationId,
+            string reason)
+        {
+            if (_recoverableMenuPresentation == null ||
+                !MenuPresentationPolicy.IsValidPresentationId(presentationId) ||
+                !string.Equals(
+                    _recoverableMenuPresentation.Value<string>("presentationId"),
+                    presentationId,
+                    StringComparison.Ordinal) ||
+                !ReactorHostApi.CanMarkMenuPresentationReady(presentationId!) ||
+                _delayedMenuPresentationRecoveryAttempts >=
+                    MaximumDelayedPresentationRecoveryAttempts)
+            {
+                return false;
+            }
+
+            // The old document may simply have finished its initial layout
+            // after the first bounded gate elapsed. Retry exactly once from
+            // script lifecycle state, without treating an extension-owned
+            // menu as closed or waiting for a telemetry publication.
+            _delayedMenuPresentationRecoveryAttempts++;
+            _delayedMenuPresentationRecoveryPending = true;
+            _inputMode = MenuPresentationPolicy.PendingPresentationInputMode;
+            TraceRuntime(
+                "menu_presentation_recovery_scheduled",
+                $"presentation={presentationId} reason={reason} " +
+                $"attempt={_delayedMenuPresentationRecoveryAttempts} " +
+                "trigger=timeout telemetry_independent=true");
+            return true;
+        }
+
+        private void ClearRecoverableMenuPresentation(string? presentationId = null)
+        {
+            if (_recoverableMenuPresentation == null)
+                return;
+            var recoverableId =
+                _recoverableMenuPresentation.Value<string>("presentationId");
+            if (presentationId != null &&
+                !string.Equals(recoverableId, presentationId, StringComparison.Ordinal))
+                return;
+            _recoverableMenuPresentation = null;
+            _delayedMenuPresentationRecoveryPending = false;
+            _delayedMenuPresentationRecoveryAttempts = 0;
         }
 
         private void CancelStartupIntentIfActive(string reason)
@@ -1925,6 +2131,7 @@ namespace RageWebUI.Script
             }
 
             var exactPresentationId = presentationId!;
+            ClearRecoverableMenuPresentation(exactPresentationId);
             // Registry removal may precede this failure callback. Revoke only
             // this ID's input state even if the later registry lookup is stale;
             // never change visibility/input mode on that stale lookup.
@@ -2002,7 +2209,11 @@ namespace RageWebUI.Script
             {
                 _overlay.PostEvent(
                     "host.surface",
-                    new JObject { ["mode"] = "none" });
+                    new JObject
+                    {
+                        ["mode"] = HostSurfaceMode.None,
+                        ["generation"] = NextHostSurfaceGeneration(),
+                    });
             }
             _overlay.SetVisible(false);
             TraceRuntime(
@@ -2059,6 +2270,8 @@ namespace RageWebUI.Script
                 : ReactorHostApi.AcknowledgeMenuPresentationHidden(
                     expectedPresentationId);
             if (dismissal == null) return;
+            ClearRecoverableMenuPresentation(
+                dismissal.Value<string>("presentationId"));
             RevokeProviderPresentationInputIntent(dismissal.Value<string>("presentationId"), reason);
             dismissal["reason"] = reason;
             PostCoreEvent(MenuPresentationPolicy.DismissedEventName, dismissal);

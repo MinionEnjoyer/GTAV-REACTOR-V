@@ -27,7 +27,7 @@ namespace RageWebUI.Core.Tests
                 StringComparison.Ordinal);
             Assert.Contains("'enhanced-live-test'", build, StringComparison.Ordinal);
             Assert.Contains(
-                "'ReactorV-0.2.6-enhanced-live-test.zip'",
+                "'ReactorV-0.2.8-enhanced-live-test.zip'",
                 build,
                 StringComparison.Ordinal);
             Assert.Contains("'1.0.1158.16'", build, StringComparison.Ordinal);

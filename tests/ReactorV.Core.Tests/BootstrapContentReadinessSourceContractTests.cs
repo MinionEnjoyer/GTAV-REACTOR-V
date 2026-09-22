@@ -101,11 +101,26 @@ public sealed class BootstrapContentReadinessSourceContractTests
         Assert.Contains("_lastTracedContentGeneration", runtime);
         Assert.Contains("_lastTracedContentReady", runtime);
         Assert.Contains(
-            "if (generation != _lastTracedContentGeneration ||",
+            "if (localGenerationForTrace != _lastTracedContentGeneration ||",
             runtime);
         Assert.Contains(
             "readyValue != _lastTracedContentReady)",
             runtime);
+    }
+
+    [Fact]
+    public void ProviderProxyReconnectOwnsItsWorkersAndRejectsRetiredPipeFrames()
+    {
+        var runtime = ReadRepositoryFile(
+            "src", "ReactorV.Runtime", "BootstrapOverlayRuntime.cs");
+
+        Assert.Contains("private sealed class TransportSession", runtime);
+        Assert.Contains("public ManualResetEvent Stop", runtime);
+        Assert.Contains("private void ReconnectLoop()", runtime);
+        Assert.Contains("ThreadPool.QueueUserWorkItem(_ => ReconnectLoop())", runtime);
+        Assert.Contains("if (!IsCurrentTransport(session)) break;", runtime);
+        Assert.Contains("session.Abort();", runtime);
+        Assert.DoesNotContain("private readonly ManualResetEvent _stop", runtime);
     }
 
     private static void AssertPresentationOnly(string region)

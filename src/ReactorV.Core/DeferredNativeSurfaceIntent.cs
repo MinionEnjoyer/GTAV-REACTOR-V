@@ -36,6 +36,21 @@ namespace RageWebUI.Core
                 : NativeSurfaceRequestAction.DeferUntilNativeReady;
         }
 
+        /// <summary>
+        /// A renderer-unavailable edge can invalidate a surface which was
+        /// already published. Reprove it exactly once: a pending replacement
+        /// is already governed by the normal bounded readiness/paint path and
+        /// must not be republished by repeated unavailable notifications.
+        /// </summary>
+        public static bool ShouldReprovePublishedSurface(
+            bool nativePresenterReady,
+            bool requestedVisible,
+            bool nativeSurface,
+            int publishedGeneration,
+            int pendingGeneration) =>
+            !nativePresenterReady && requestedVisible && nativeSurface &&
+            publishedGeneration > 0 && pendingGeneration == 0;
+
         public void Defer(string mode, int generation, int providerSessionGeneration)
         {
             if (string.IsNullOrWhiteSpace(mode)) throw new ArgumentException("A mode is required.", nameof(mode));

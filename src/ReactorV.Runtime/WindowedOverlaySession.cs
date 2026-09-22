@@ -206,6 +206,14 @@ namespace RageWebUI.Runtime
             }
 
             Interlocked.Exchange(ref _committedProviderPresentationId, null);
+            Interlocked.Exchange(ref _requestedVisible, 0);
+            Interlocked.Exchange(ref _actualVisible, 0);
+            Interlocked.Exchange(ref _verifiedHostSurface, null);
+            lock (_cursorSync)
+            {
+                _cursorEdges.Clear();
+                _hasPendingCursorMove = _hasCursor = false;
+            }
             Interlocked.Exchange(
                 ref _userIntentAuthorizedProviderPresentationId,
                 null);
@@ -217,7 +225,7 @@ namespace RageWebUI.Runtime
                     window.SignalRevealIngress();
                     return true;
                 });
-            if (_uiThread.IsAlive)
+            if (_uiThread.IsAlive && Thread.CurrentThread != _uiThread)
             {
                 _uiThread.Join(2000);
             }
@@ -296,6 +304,13 @@ namespace RageWebUI.Runtime
                 window.BeginInvoke(
                     (Action<OverlayWindow>)(queuedWindow =>
                     {
+                        if (queuedWindow.IsDisposed || !ReferenceEquals(_window, queuedWindow))
+                            return;
+                        if (Volatile.Read(ref _disposed) != 0)
+                        {
+                            queuedWindow.Close();
+                            return;
+                        }
                         if (ingressAnnounced)
                             queuedWindow.ApplyRevealIngress();
                         try
@@ -326,13 +341,16 @@ namespace RageWebUI.Runtime
 
         private void RunUiThread()
         {
+            OverlayWindow? ownedWindow = null;
+            ApplicationContext? context = null;
             try
             {
+                if (Volatile.Read(ref _disposed) != 0) return;
                 Interlocked.Exchange(ref _committedProviderPresentationId, null);
                 RuntimeTrace.Write(_logDirectory, "webview_ui_thread_start");
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                var window = new OverlayWindow(
+                var window = ownedWindow = new OverlayWindow(
                     _gtaWindow,
                     (uint)System.Diagnostics.Process.GetCurrentProcess().Id,
                     _uiDirectory,
@@ -386,7 +404,7 @@ namespace RageWebUI.Runtime
                 // Create the HWND and preload WebView2 without asking WinForms
                 // to show the Form. Application.Run(Form) briefly exposed a
                 // blank full-screen surface during GTA startup.
-                var context = new ApplicationContext();
+                context = new ApplicationContext();
                 window.FormClosed += (_, __) =>
                 {
                     Interlocked.Exchange(
@@ -398,6 +416,7 @@ namespace RageWebUI.Runtime
                     context.ExitThread();
                 };
                 var unusedHandle = window.Handle;
+                if (Volatile.Read(ref _disposed) != 0) return;
                 // A visibility request can arrive after the constructor read
                 // _requestedVisible but before the HWND existed. Replay the
                 // atomic session state once the handle is ready so that race
@@ -417,6 +436,24 @@ namespace RageWebUI.Runtime
                     _logDirectory,
                     "webview_ui_thread_failed",
                     $"type={error.GetType().FullName} message={error.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _window, null);
+                Interlocked.Exchange(ref _requestedVisible, 0);
+                Interlocked.Exchange(ref _actualVisible, 0);
+                Interlocked.Exchange(ref _verifiedHostSurface, null);
+                Interlocked.Exchange(ref _committedProviderPresentationId, null);
+                Interlocked.Exchange(ref _userIntentAuthorizedProviderPresentationId, null);
+                lock (_cursorSync)
+                {
+                    _cursorEdges.Clear();
+                    _cursorDispatchQueued = _hasPendingCursorMove = _hasCursor = false;
+                }
+                // Dispose on the owning STA even when creation/preload failed
+                // before Application.Run or Dispose raced HWND creation.
+                try { ownedWindow?.Dispose(); }
+                finally { context?.Dispose(); }
             }
         }
 

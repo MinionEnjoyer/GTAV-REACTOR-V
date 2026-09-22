@@ -29,6 +29,8 @@ namespace RageWebUI.DirectX
         internal const int MaximumPendingPostJsonMessages = 256;
         internal const int AcceleratedBootstrapRepaintIntervalMilliseconds = 250;
         internal const int SurfaceAcknowledgementPollMilliseconds = 25;
+        internal const int MaximumRendererRecoveryAttempts = 2;
+        internal const int RendererCallbackDrainTimeoutMilliseconds = 1000;
         internal const int MaximumAcceleratedBootstrapRepaintAttempts =
             FirstAcceleratedFrameTimeoutMilliseconds /
             AcceleratedBootstrapRepaintIntervalMilliseconds + 1;
@@ -47,6 +49,7 @@ namespace RageWebUI.DirectX
         private readonly bool _enableDevTools;
 
         private OffscreenBrowser? _browser;
+        private BrowserEventSubscription? _browserSubscription;
         private readonly Queue<string> _pendingPostJson = new Queue<string>();
         private readonly ExclusiveCreationLease _browserCreationLease =
             new ExclusiveCreationLease();
@@ -72,8 +75,14 @@ namespace RageWebUI.DirectX
         private int _matchingFrameRevision;
         private long _matchingSubmittedGeneration;
         private long _latestSubmittedGeneration;
+        private readonly MonotonicGenerationEpochGate _frameEpochGate =
+            new MonotonicGenerationEpochGate();
         private long _minimumRequiredGeneration = 1;
         private int _disableQueued;
+        private int _rendererRecoveryEligible;
+        private int _rendererRecoveryAttempt;
+        private int _rendererRecoveryQueued;
+        private int _deferredBrowserCleanupQueued;
         private int _unavailablePublished;
         private int _started;
         private int _disposed;
@@ -161,6 +170,7 @@ namespace RageWebUI.DirectX
             lock (_sync)
             {
                 ThrowIfDisposed();
+                if (Volatile.Read(ref _deferredBrowserCleanupQueued) != 0) return false;
                 if (Volatile.Read(ref _started) == 1) return true;
                 Volatile.Write(ref _disableQueued, 0);
                 Volatile.Write(ref _unavailablePublished, 0);
@@ -204,8 +214,7 @@ namespace RageWebUI.DirectX
                 }
                 catch (Exception error)
                 {
-                    StopBrowser();
-                    StopProducer();
+                    if (StopBrowser()) StopProducer();
                     Volatile.Write(ref _started, 0);
                     NotifyStartupFailed(error);
                     return false;
@@ -327,8 +336,7 @@ namespace RageWebUI.DirectX
                     return false;
                 }
 
-                var generationHighWatermark =
-                    CaptureGenerationHighWatermark(browser);
+                var generationHighWatermark = CaptureGenerationHighWatermark();
                 var minimumRequiredGeneration = NextGeneration(
                     generationHighWatermark);
                 Interlocked.Exchange(
@@ -408,15 +416,20 @@ namespace RageWebUI.DirectX
         {
             lock (_sync)
             {
-                StopBrowser();
-                StopProducer();
+                if (StopBrowser()) StopProducer();
                 Volatile.Write(ref _browserContentReady, 0);
                 Volatile.Write(ref _transportReady, 0);
                 Volatile.Write(ref _sizedFrameReady, 0);
                 Volatile.Write(ref _contentReady, 0);
                 Volatile.Write(ref _disableQueued, 0);
-                Interlocked.Exchange(ref _latestSubmittedGeneration, 0);
-                Interlocked.Exchange(ref _minimumRequiredGeneration, 1);
+                // Frame generations deliberately survive Stop/Start on the
+                // same producer instance. A late CEF callback must never be
+                // able to reuse a number accepted by the previous lifetime.
+                Interlocked.Exchange(ref _minimumRequiredGeneration,
+                    NextGeneration(_frameEpochGate.CurrentGeneration));
+                Volatile.Write(ref _rendererRecoveryEligible, 0);
+                Volatile.Write(ref _rendererRecoveryAttempt, 0);
+                Volatile.Write(ref _rendererRecoveryQueued, 0);
                 Volatile.Write(ref _started, 0);
             }
         }
@@ -427,7 +440,9 @@ namespace RageWebUI.DirectX
             Stop();
         }
 
-        private OffscreenBrowser CreateBrowser(GpuAdapterLuid adapterLuid) => new OffscreenBrowser(
+        private OffscreenBrowser CreateBrowser(
+            GpuAdapterLuid adapterLuid,
+            int browserEpoch) => new OffscreenBrowser(
                 _parentWindow,
                 _uiDirectory,
                 _runtimeDirectory,
@@ -444,16 +459,53 @@ namespace RageWebUI.DirectX
                 allowAcceleratedBootstrapProbe: true,
                 forceCpuRendering: false,
                 browserRole: "gpu-renderer",
-                adapterLuid: adapterLuid);
+                adapterLuid: adapterLuid,
+                frameGenerationSource: NextFrameGeneration,
+                frameAcceptance: () => IsCurrentBrowserEpoch(browserEpoch),
+                submissionLeaseSource: () => _frameEpochGate.TryAcquireSubmission(
+                    browserEpoch,
+                    out var lease)
+                    ? lease
+                    : null);
 
-        private void AttachBrowser(OffscreenBrowser browser)
+        private sealed class BrowserEventSubscription
+        {
+            internal BrowserEventSubscription(
+                ExternalGpuBrowserSession owner,
+                OffscreenBrowser browser,
+                int browserEpoch)
+            {
+                ContentReady = () => owner.OnBrowserContentReady(browser, browserEpoch);
+                ContentUnavailable = () => owner.OnBrowserContentUnavailable(browser, browserEpoch);
+                AcceleratedTransportReady = () => owner.OnAcceleratedTransportReady(browser, browserEpoch);
+                AcceleratedTransportUnavailable = () =>
+                    owner.OnCurrentAcceleratedTransportUnavailable(browser, browserEpoch);
+                AcceleratedFrameSubmitted = (width, height, generation) =>
+                    owner.OnAcceleratedFrameSubmitted(
+                        browser,
+                        browserEpoch,
+                        width,
+                        height,
+                        generation);
+            }
+
+            internal Action ContentReady { get; }
+            internal Action ContentUnavailable { get; }
+            internal Action AcceleratedTransportReady { get; }
+            internal Action AcceleratedTransportUnavailable { get; }
+            internal Action<int, int, ulong> AcceleratedFrameSubmitted { get; }
+        }
+
+        private void AttachBrowser(OffscreenBrowser browser, int browserEpoch)
         {
             _browser = browser ?? throw new ArgumentNullException(nameof(browser));
-            browser.ContentReady += OnBrowserContentReady;
-            browser.ContentUnavailable += OnBrowserContentUnavailable;
-            browser.AcceleratedTransportReady += OnAcceleratedTransportReady;
-            browser.AcceleratedTransportUnavailable += OnAcceleratedTransportUnavailable;
-            browser.AcceleratedFrameSubmitted += OnAcceleratedFrameSubmitted;
+            var subscription = new BrowserEventSubscription(this, browser, browserEpoch);
+            _browserSubscription = subscription;
+            browser.ContentReady += subscription.ContentReady;
+            browser.ContentUnavailable += subscription.ContentUnavailable;
+            browser.AcceleratedTransportReady += subscription.AcceleratedTransportReady;
+            browser.AcceleratedTransportUnavailable += subscription.AcceleratedTransportUnavailable;
+            browser.AcceleratedFrameSubmitted += subscription.AcceleratedFrameSubmitted;
 
             Volatile.Write(ref _browserContentReady, browser.IsContentReady ? 1 : 0);
             Volatile.Write(ref _transportReady, browser.IsAcceleratedTransportReady ? 1 : 0);
@@ -461,8 +513,9 @@ namespace RageWebUI.DirectX
             Volatile.Write(ref _contentReady, 0);
             Volatile.Write(ref _matchingFrameRevision, 0);
             Interlocked.Exchange(ref _matchingSubmittedGeneration, 0);
-            Interlocked.Exchange(ref _latestSubmittedGeneration, 0);
-            Interlocked.Exchange(ref _minimumRequiredGeneration, 1);
+            var generationHighWatermark = CaptureGenerationHighWatermark();
+            Interlocked.Exchange(ref _minimumRequiredGeneration,
+                NextGeneration(generationHighWatermark));
 
             if (browser.SurfaceWidth != SurfaceWidth ||
                 browser.SurfaceHeight != SurfaceHeight)
@@ -472,6 +525,9 @@ namespace RageWebUI.DirectX
                         "CEF rejected the requested GTA client surface size.");
             }
 
+            // Do not allow CEF to submit a callback from this instance until
+            // its generation floor and all session state are installed.
+            _frameEpochGate.Activate(browserEpoch);
             while (_pendingPostJson.Count > 0)
                 browser.PostJson(_pendingPostJson.Dequeue());
 
@@ -481,23 +537,108 @@ namespace RageWebUI.DirectX
             PublishContentReadyIfEligible();
         }
 
-        private void StopBrowser()
+        private bool StopBrowser()
         {
             CancelAdapterLuidDiscovery();
             CancelFirstFrameTimer();
             CancelSurfaceAcknowledgementPoll();
             CancelAcceleratedBootstrapRepaintPump();
+            if (Volatile.Read(ref _deferredBrowserCleanupQueued) != 0) return false;
+            if (!_frameEpochGate.RetireAndDrain(
+                    RendererCallbackDrainTimeoutMilliseconds))
+            {
+                TraceAcceleratedBootstrap(
+                    "renderer_callback_drain_timeout",
+                    $"timeout_ms={RendererCallbackDrainTimeoutMilliseconds}");
+                QueueDeferredBrowserCleanup();
+                return false;
+            }
+            CompleteBrowserCleanup();
+            return true;
+        }
+
+        private void QueueDeferredBrowserCleanup()
+        {
+            if (Interlocked.CompareExchange(ref _deferredBrowserCleanupQueued, 1, 0) != 0)
+                return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                // Publish terminal unavailability promptly; a genuinely stuck
+                // graphics callback may never drain. Keep its owned resources
+                // alive until it returns, without leaving the host waiting for
+                // a ready transition that this producer can no longer promise.
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    Volatile.Write(ref _contentReady, 0);
+                    Volatile.Write(ref _sizedFrameReady, 0);
+                    PublishPresentationReadiness(false);
+                    PublishContentUnavailable();
+                    NotifyStartupFailed(new TimeoutException(
+                        "Renderer callback retirement exceeded its bounded deadline."));
+                }
+                _frameEpochGate.WaitForDrain();
+                lock (_sync)
+                {
+                    try
+                    {
+                        CompleteBrowserCleanup();
+                        StopProducer();
+                        Volatile.Write(ref _deferredBrowserCleanupQueued, 0);
+                    }
+                    catch (Exception error)
+                    {
+                        // Keep the restart fence closed if ownership could
+                        // not be released; never unwind on a pool thread.
+                        TraceAcceleratedBootstrap("renderer_deferred_cleanup_failed",
+                            $"type={error.GetType().Name} message={error.Message}");
+                    }
+                    finally
+                    {
+                        Volatile.Write(ref _browserContentReady, 0);
+                        Volatile.Write(ref _transportReady, 0);
+                        Volatile.Write(ref _sizedFrameReady, 0);
+                        Volatile.Write(ref _contentReady, 0);
+                        Volatile.Write(ref _started, 0);
+                    }
+                }
+            });
+        }
+
+        private void CompleteBrowserCleanup()
+        {
             _pendingPostJson.Clear();
             var browser = _browser;
             _browser = null;
+            var subscription = _browserSubscription;
+            _browserSubscription = null;
             if (browser == null) return;
-            browser.ContentReady -= OnBrowserContentReady;
-            browser.ContentUnavailable -= OnBrowserContentUnavailable;
-            browser.AcceleratedTransportReady -= OnAcceleratedTransportReady;
-            browser.AcceleratedTransportUnavailable -= OnAcceleratedTransportUnavailable;
-            browser.AcceleratedFrameSubmitted -= OnAcceleratedFrameSubmitted;
+            if (subscription != null)
+            {
+                browser.ContentReady -= subscription.ContentReady;
+                browser.ContentUnavailable -= subscription.ContentUnavailable;
+                browser.AcceleratedTransportReady -= subscription.AcceleratedTransportReady;
+                browser.AcceleratedTransportUnavailable -= subscription.AcceleratedTransportUnavailable;
+                browser.AcceleratedFrameSubmitted -= subscription.AcceleratedFrameSubmitted;
+            }
             browser.Dispose();
         }
+
+        private bool IsCurrentBrowser(OffscreenBrowser browser, int browserEpoch)
+        {
+            lock (_sync)
+            {
+                return Volatile.Read(ref _disposed) == 0 &&
+                    Volatile.Read(ref _started) != 0 &&
+                    _frameEpochGate.IsActive(browserEpoch) &&
+                    ReferenceEquals(_browser, browser);
+            }
+        }
+
+        private bool IsCurrentBrowserEpoch(int browserEpoch) =>
+            browserEpoch != 0 &&
+            _frameEpochGate.IsActive(browserEpoch) &&
+            Volatile.Read(ref _disposed) == 0 &&
+            Volatile.Read(ref _started) != 0;
 
         private void StartAdapterLuidDiscovery()
         {
@@ -555,6 +696,22 @@ namespace RageWebUI.DirectX
             if (decision == AdapterLuidDiscoveryDecision.Continue) return;
             if (decision == AdapterLuidDiscoveryDecision.Defer)
             {
+                // First startup may legitimately precede GTA device creation,
+                // so it remains deferred until session cancellation. Once an
+                // already acknowledged renderer is recovering, however, each
+                // adapter reacquisition is bounded by this fast window and
+                // consumes one finite renderer-recovery attempt.
+                if (Volatile.Read(ref _rendererRecoveryEligible) != 0 &&
+                    Volatile.Read(ref _rendererRecoveryAttempt) != 0)
+                {
+                    if (!TryCompleteAdapterLuidDiscovery(epoch)) return;
+                    TraceAcceleratedBootstrap(
+                        "adapter_luid_recovery_deadline",
+                        $"target_pid={_targetGtaProcessId} epoch={epoch} " +
+                        $"attempt={Volatile.Read(ref _rendererRecoveryAttempt)}");
+                    QueueRendererRecovery("adapter-luid-recovery-timeout");
+                    return;
+                }
                 if (TryEnterDeferredAdapterLuidDiscovery(epoch))
                 {
                     TraceAcceleratedBootstrap(
@@ -606,7 +763,12 @@ namespace RageWebUI.DirectX
             {
                 // This callback runs on a Timer/ThreadPool worker. CEF's
                 // context-readiness wait can never block the Preloader UI.
-                var browser = CreateBrowser(adapterLuid);
+                // Advance the identity before construction. A callback from a
+                // prior browser is rejected immediately, even if CEF invokes
+                // it while this constructor is still returning.
+                var browserEpoch = _frameEpochGate.BeginReplacement();
+                // Replaces the pre-epoch form: var browser = CreateBrowser(adapterLuid);
+                var browser = CreateBrowser(adapterLuid, browserEpoch);
                 lock (_sync)
                 {
                     if (Volatile.Read(ref _disposed) != 0 ||
@@ -618,7 +780,7 @@ namespace RageWebUI.DirectX
                         browser.Dispose();
                         return;
                     }
-                    AttachBrowser(browser);
+                    AttachBrowser(browser, browserEpoch);
                 }
             }
             catch (Exception error)
@@ -841,6 +1003,10 @@ namespace RageWebUI.DirectX
             CancelSurfaceAcknowledgementPoll();
             CancelFirstFrameTimer();
             CancelAcceleratedBootstrapRepaintPump();
+            // A fresh acknowledged generation closes the previous recovery
+            // episode. Future transport faults get their own bounded budget.
+            Volatile.Write(ref _rendererRecoveryEligible, 1);
+            Volatile.Write(ref _rendererRecoveryAttempt, 0);
             TraceAcceleratedBootstrap(
                 "accelerated_surface_frame_acknowledged",
                 $"size={SurfaceWidth}x{SurfaceHeight} revision={revision} " +
@@ -989,44 +1155,51 @@ namespace RageWebUI.DirectX
                 stage,
                 detail);
 
-        private void OnBrowserContentReady()
+        private void OnBrowserContentReady(OffscreenBrowser browser, int browserEpoch)
         {
+            if (!IsCurrentBrowser(browser, browserEpoch)) return;
             Volatile.Write(ref _browserContentReady, 1);
             PublishContentReadyIfEligible();
         }
 
-        private void OnBrowserContentUnavailable()
+        private void OnBrowserContentUnavailable(OffscreenBrowser browser, int browserEpoch)
         {
-            CancelSurfaceAcknowledgementPoll();
-            CancelAcceleratedBootstrapRepaintPump();
+            if (!IsCurrentBrowser(browser, browserEpoch)) return;
             Volatile.Write(ref _browserContentReady, 0);
+            // Browser loss revokes the ACK that qualified this presentation.
+            // Recovery must never mistake that old proof for its replacement.
+            InvalidateSizedFrameReadiness();
             QueueExternalGpuDisable(
                 "browser-content-unavailable",
                 cancelIfTransportRecovered: false);
         }
 
-        private void OnAcceleratedTransportReady()
+        private void OnAcceleratedTransportReady(OffscreenBrowser browser, int browserEpoch)
         {
+            if (!IsCurrentBrowser(browser, browserEpoch)) return;
             // Transport readiness alone is not proof of a matching, ACKed
             // surface. Keep the bounded pump alive until both are true.
             if (Volatile.Read(ref _sizedFrameReady) == 1)
                 CancelAcceleratedBootstrapRepaintPump();
             Volatile.Write(ref _transportReady, 1);
-            var browser = _browser;
+            var currentBrowser = _browser;
             TraceAcceleratedBootstrap(
                 "accelerated_bootstrap_ready",
                 $"attempts={Volatile.Read(ref _bootstrapRepaintAttempts)} " +
-                $"paint_callbacks={browser?.AcceleratedPaintCallbackCount ?? 0} " +
-                $"probe_rejected={browser?.AcceleratedProbeRejectedCount ?? 0} " +
-                $"probe_deferred={browser?.AcceleratedProbeDeferredCount ?? 0}");
+                $"paint_callbacks={currentBrowser?.AcceleratedPaintCallbackCount ?? 0} " +
+                $"probe_rejected={currentBrowser?.AcceleratedProbeRejectedCount ?? 0} " +
+                $"probe_deferred={currentBrowser?.AcceleratedProbeDeferredCount ?? 0}");
             PublishContentReadyIfEligible();
         }
 
         private void OnAcceleratedFrameSubmitted(
+            OffscreenBrowser browser,
+            int browserEpoch,
             int width,
             int height,
             ulong generation)
         {
+            if (!IsCurrentBrowser(browser, browserEpoch)) return;
             var submittedGeneration = NormalizeGeneration(generation);
             ObserveLatestSubmittedGeneration(submittedGeneration);
 
@@ -1083,11 +1256,11 @@ namespace RageWebUI.DirectX
             StartSurfaceAcknowledgementPoll();
         }
 
-        private long CaptureGenerationHighWatermark(OffscreenBrowser browser)
+        private long CaptureGenerationHighWatermark()
         {
             var highWatermark = Math.Max(
                 Math.Max(
-                    browser.AcceleratedPaintCallbackCount,
+                    _frameEpochGate.CurrentGeneration,
                     Interlocked.Read(ref _latestSubmittedGeneration)),
                 Interlocked.Read(ref _matchingSubmittedGeneration));
 
@@ -1103,9 +1276,23 @@ namespace RageWebUI.DirectX
             highWatermark = Math.Max(
                 highWatermark,
                 NormalizeGeneration(diagnostics.LastSubmittedGeneration));
-            return Math.Max(
+            highWatermark = Math.Max(
                 highWatermark,
                 NormalizeGeneration(diagnostics.LastAcknowledgedGeneration));
+            if (!ObserveFrameGenerationHighWatermark(highWatermark))
+                throw new InvalidOperationException("The frame generation domain is exhausted.");
+            return _frameEpochGate.CurrentGeneration;
+        }
+
+        private ulong NextFrameGeneration()
+        {
+            if (_frameEpochGate.TryAllocate(out var generation)) return generation;
+            throw new InvalidOperationException("The frame generation domain is exhausted.");
+        }
+
+        private bool ObserveFrameGenerationHighWatermark(long generation)
+        {
+            return generation >= 0 && _frameEpochGate.TryObserve(unchecked((ulong)generation));
         }
 
         private void ObserveLatestSubmittedGeneration(long generation)
@@ -1131,7 +1318,17 @@ namespace RageWebUI.DirectX
                 : unchecked((long)generation);
 
         private static long NextGeneration(long generation) =>
-            generation >= long.MaxValue ? long.MaxValue : generation + 1;
+            generation < long.MaxValue
+                ? generation + 1
+                : throw new InvalidOperationException("The frame generation domain is exhausted.");
+
+        private void OnCurrentAcceleratedTransportUnavailable(
+            OffscreenBrowser browser,
+            int browserEpoch)
+        {
+            if (!IsCurrentBrowser(browser, browserEpoch)) return;
+            OnAcceleratedTransportUnavailable();
+        }
 
         private void OnAcceleratedTransportUnavailable()
         {
@@ -1154,8 +1351,16 @@ namespace RageWebUI.DirectX
         private void QueueExternalGpuDisable(
             string reason,
             bool cancelIfTransportRecovered,
-            int expectedAdapterLuidDiscoveryEpoch = 0)
+            int expectedAdapterLuidDiscoveryEpoch = 0,
+            bool forceDisable = false)
         {
+            if (expectedAdapterLuidDiscoveryEpoch != 0 &&
+                !IsCurrentAdapterLuidDiscoveryEpoch(
+                    expectedAdapterLuidDiscoveryEpoch))
+            {
+                return;
+            }
+            if (!forceDisable && QueueRendererRecovery(reason)) return;
             if (Interlocked.CompareExchange(ref _disableQueued, 1, 0) != 0)
                 return;
 
@@ -1168,6 +1373,92 @@ namespace RageWebUI.DirectX
                 reason,
                 cancelIfTransportRecovered,
                 expectedAdapterLuidDiscoveryEpoch));
+        }
+
+        private bool QueueRendererRecovery(string reason)
+        {
+            if (Volatile.Read(ref _deferredBrowserCleanupQueued) != 0) return false;
+            if (Volatile.Read(ref _rendererRecoveryEligible) == 0 ||
+                Volatile.Read(ref _disposed) != 0 ||
+                Volatile.Read(ref _started) == 0)
+            {
+                return false;
+            }
+            if (Interlocked.CompareExchange(ref _rendererRecoveryQueued, 1, 0) != 0)
+                return true;
+
+            ThreadPool.QueueUserWorkItem(_ => RecoverRenderer(reason));
+            return true;
+        }
+
+        private void RecoverRenderer(string reason)
+        {
+            var attempt = 0;
+            Exception? failure = null;
+            var exhausted = false;
+            lock (_sync)
+            {
+                Volatile.Write(ref _rendererRecoveryQueued, 0);
+                if (Volatile.Read(ref _disposed) != 0 ||
+                    Volatile.Read(ref _deferredBrowserCleanupQueued) != 0 ||
+                    Volatile.Read(ref _started) == 0 ||
+                    Volatile.Read(ref _sizedFrameReady) == 1)
+                {
+                    return;
+                }
+
+                attempt = Interlocked.Increment(ref _rendererRecoveryAttempt);
+                exhausted = attempt > MaximumRendererRecoveryAttempts;
+                if (!exhausted)
+                {
+                    try
+                    {
+                        // This invalidates the CEF epoch before native state is
+                        // restarted. Delayed old callbacks are rejected before
+                        // their transient texture reaches the producer.
+                        if (!StopBrowser())
+                            throw new TimeoutException("An old renderer callback did not drain.");
+                        StopProducer();
+                        Volatile.Write(ref _browserContentReady, 0);
+                        Volatile.Write(ref _transportReady, 0);
+                        Volatile.Write(ref _sizedFrameReady, 0);
+                        Volatile.Write(ref _contentReady, 0);
+                        Interlocked.Exchange(ref _matchingSubmittedGeneration, 0);
+                        Interlocked.Exchange(ref _minimumRequiredGeneration,
+                            NextGeneration(CaptureGenerationHighWatermark()));
+
+                        if (!NativeCompositor.StartSharedTextureProducer(_targetGtaProcessId))
+                            throw new InvalidOperationException("The shared-texture producer did not restart.");
+                        _producerStarted = true;
+                        if (!NativeCompositor.SetSharedTextureProducerVisible(false))
+                            throw new InvalidOperationException("The restarted producer could not be hidden.");
+                        StartAdapterLuidDiscovery();
+                    }
+                    catch (Exception error)
+                    {
+                        failure = error;
+                    }
+                }
+            }
+
+            if (exhausted)
+            {
+                QueueExternalGpuDisable(
+                    "renderer-recovery-exhausted",
+                    cancelIfTransportRecovered: false,
+                    forceDisable: true);
+                return;
+            }
+
+            // Publish once for this failure episode so the wrapper invalidates
+            // its browser proofs and stages a fresh host-surface generation.
+            PublishContentUnavailable();
+
+            TraceAcceleratedBootstrap(
+                failure == null ? "renderer_recovery_started" : "renderer_recovery_start_failed",
+                $"reason={reason} attempt={attempt} max_attempts={MaximumRendererRecoveryAttempts} " +
+                $"failure={failure?.GetType().Name ?? "none"}");
+            if (failure != null) QueueRendererRecovery("renderer-recovery-start-failed");
         }
 
         private void DisableExternalGpuPath(
@@ -1195,7 +1486,7 @@ namespace RageWebUI.DirectX
                     return;
                 }
 
-                StopBrowser();
+                if (!StopBrowser()) return;
                 StopProducer();
                 Volatile.Write(ref _browserContentReady, 0);
                 Volatile.Write(ref _transportReady, 0);
@@ -1220,6 +1511,9 @@ namespace RageWebUI.DirectX
             }
 
 
+            // A fresh ready edge re-arms unavailable notification for a later
+            // independent recovery episode.
+            Volatile.Write(ref _unavailablePublished, 0);
             // Announce the exact-size commit boundary before enabling native
             // output. The Preloader can retire WebView2 for the same
             // presentation ID, then apply its deferred visibility request.

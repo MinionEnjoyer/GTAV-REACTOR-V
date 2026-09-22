@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "component": "reactor-fpv-hud",
+  "transport": "hud.frame",
+  "frame_kind": "speedometer",
+  "fpv_schema": 1,
+  "interactive": false
+}

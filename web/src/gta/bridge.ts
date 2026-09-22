@@ -1,4 +1,5 @@
 import { DemoTransport } from './demoTransport'
+import { parseHostSurface } from '../surface'
 import type { BridgeEvent, BridgeResponse, CefSharpBridge, GameState, RuntimeStatus, Vector3, WebViewTransport } from './types'
 
 declare global {
@@ -389,7 +390,11 @@ export class GtaBridge {
     this.latestEvents.clear()
   }
 
+  private surfaceGeneration = 0
+  private surfaceMode: string | undefined
+
   private onMessage(data: unknown): void {
+    if (this.destroyed) return
     if (isBridgeResponse(data)) {
       const pending = this.pending.get(data.id)
       if (!pending) return
@@ -405,6 +410,17 @@ export class GtaBridge {
     }
 
     if (isBridgeEvent(data)) {
+      if (data.event === 'host.surface') {
+        const surface = parseHostSurface(data.payload)
+        if (!surface) return
+        const generation = surface.generation ?? 0
+        // Installer/demo surfaces may be unversioned before a real host takes
+        // ownership. Thereafter both browser paths reject regressing frames.
+        if (generation < this.surfaceGeneration ||
+          (generation > 0 && generation === this.surfaceGeneration && surface.mode !== this.surfaceMode)) return
+        this.surfaceGeneration = generation
+        this.surfaceMode = surface.mode
+      }
       if (replayableEventNames.has(data.event)) {
         this.latestEvents.set(data.event, data.payload)
       } else if (data.event === 'menu.dismissed' && isRecord(data.payload)) {

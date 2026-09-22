@@ -17,9 +17,8 @@ public sealed class PresentationTransferAbortSourceContractTests
             "private void OnTick(object sender, EventArgs args)",
             "private void OnKeyDown(object sender, KeyEventArgs args)");
 
-        Assert.Contains(
-            "AbortPresentationTransfer(\n                    expiredPresentationId,",
-            NormalizeNewlines(tick));
+        Assert.Contains("var aborted = AbortPresentationTransfer(", tick);
+        Assert.Contains("expiredPresentationId,", tick);
         Assert.Contains(
             "AbortPresentationTransfer(\n                    expiredProviderPresentationId,",
             NormalizeNewlines(tick));
@@ -28,6 +27,9 @@ public sealed class PresentationTransferAbortSourceContractTests
             tick);
         Assert.DoesNotContain(
             "CloseOverlay(\n                    \"provider-paint-timeout\"",
+            NormalizeNewlines(tick));
+        Assert.Contains(
+            "ScheduleDelayedPresentationRecovery(\n                    expiredPresentationId,",
             NormalizeNewlines(tick));
     }
 
@@ -108,6 +110,61 @@ public sealed class PresentationTransferAbortSourceContractTests
             app);
         Assert.Contains("hostSurfaceRef.current = 'initializing'", app);
         Assert.Contains("revokeProviderInput(dismissal.presentationId)", app);
+    }
+
+    [Fact]
+    public void BrowserGenerationRecoveryRearmsTheExactMenuBeforeTelemetry()
+    {
+        var script = ReadRepositoryFile(
+            "src", "ReactorV.Script", "RageWebUiScript.cs");
+        var tick = MethodRegion(
+            script,
+            "private void OnTickCore()",
+            "private void OnKeyDown(object sender, KeyEventArgs args)");
+        var recovery = MethodRegion(
+            script,
+            "private void RecoverDelayedMenuPresentation()",
+            "private void CancelStartupIntentIfActive(string reason)");
+
+        Assert.Contains("RecoverDelayedMenuPresentation();", tick);
+        Assert.Contains("_nextTelemetryAt", tick);
+        Assert.True(
+            tick.IndexOf("RecoverDelayedMenuPresentation();", StringComparison.Ordinal) <
+            tick.IndexOf("if (Game.GameTime >= _nextTelemetryAt)", StringComparison.Ordinal));
+        Assert.Contains("ReactorHostApi.CanMarkMenuPresentationReady(presentationId!)", recovery);
+        Assert.Contains("Game.IsPaused", recovery);
+        Assert.Contains("TryRestartActiveMenuPresentation(", recovery);
+        Assert.Contains("_menuRevealGate.Begin(", recovery);
+        Assert.Contains("PostCoreEvent(\n                MenuPresentationPolicy.EventName,", NormalizeNewlines(recovery));
+        Assert.Contains("telemetry_independent=true", recovery);
+
+        var dismissed = MethodRegion(
+            script,
+            "private void PublishActiveMenuDismissed(",
+            "private void TraceRuntime(string stage, string? detail = null)");
+        Assert.Contains("ClearRecoverableMenuPresentation(", dismissed);
+
+        var generationSync = MethodRegion(
+            script,
+            "private void SynchronizeBrowserContentGeneration()",
+            "private void TryCompleteRuntimeReadyHandoff()");
+        Assert.Contains("_runtimeReadyHandoffAttempted = false;", generationSync);
+
+        var browserReady = MethodRegion(
+            script,
+            "private void MarkBrowserReady(string source, int contentGeneration = 0)",
+            "private void SynchronizeBrowserContentGeneration()");
+        Assert.Contains("browser-generation-replaced", browserReady);
+        Assert.Contains("_menuRevealGate.Cancel();", browserReady);
+        Assert.Contains("_runtimeReadyHandoffAttempted = false;", browserReady);
+
+        var retry = MethodRegion(
+            script,
+            "private bool ScheduleDelayedPresentationRecovery(",
+            "private void ClearRecoverableMenuPresentation(");
+        Assert.Contains("MaximumDelayedPresentationRecoveryAttempts", retry);
+        Assert.Contains("ReactorHostApi.CanMarkMenuPresentationReady", retry);
+        Assert.Contains("trigger=timeout telemetry_independent=true", retry);
     }
 
     private static string NormalizeNewlines(string value) =>

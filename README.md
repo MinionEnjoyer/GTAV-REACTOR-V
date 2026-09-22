@@ -8,21 +8,21 @@ Build React/HTML menus and overlays for **GTA V Story Mode** on **Legacy and Enh
 A shared runtime by **MinionEnjoyer**: each mod keeps ownership of its gameplay,
 settings and saved data. No ALLIN1 Launcher or gameplay client required.
 
-**0.2.6 — unsigned, edition-specific manual download.**
+**0.2.8 — unsigned, edition-specific manual download.**
 Use the package for your exact supported game version. **Not for GTA Online.**
 See the release notes for validation coverage and known limits.
 
 Got feedback, or need help?  Come chat in our community [Discord](https://discord.gg/hs7c2XfdD)!
 
-## What's new in 0.2.6
+## What's new in 0.2.8
 
-- Adds a fail-closed Steam Enhanced profile for GTA V Title Update 1.73 (`1.0.1158.16`).
-- Retains the prior Enhanced `1.0.1158.13` installer profile and the current Legacy profile.
-- Keeps the complete renderer, menu, HUD, and consumer feature set on both editions.
-- Explicitly tests that the BattlEye executable cannot host the Story Mode bootstrap or renderer.
+- Adds bounded recovery for bootstrap transport, browser/renderer replacement, and overlay ownership.
+- Preserves the guarded Legacy and Enhanced executable identities and their edition-specific renderer paths.
+- Adds lifecycle coverage for reconnect, stale presentation rejection, and close/reopen recovery.
+- Keeps the Story Mode and BattlEye fail-closed boundaries; this is not a GTA Online build.
 
+[0.2.8 release notes](docs/RELEASE-0.2.8.md) ·
 [Title Update 1.73 compatibility scope](docs/GTA-1.73-COMPATIBILITY.md) ·
-[0.2.6 release notes](docs/RELEASE-0.2.6.md) ·
 [ReShade compatibility](docs/DXGI-COMPATIBILITY.md)
 
 ## Downloads

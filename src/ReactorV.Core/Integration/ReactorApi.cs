@@ -306,6 +306,14 @@ namespace ReactorV.Integration
         internal static bool CanMarkMenuPresentationReady(string presentationId) =>
             ReactorRegistry.Instance.CanMarkMenuPresentationReady(presentationId);
 
+        internal static bool TryRestartActiveMenuPresentation(
+            string presentationId,
+            JObject context,
+            out JObject? retired,
+            out JObject? replacement) =>
+            ReactorRegistry.Instance.TryRestartActiveMenuPresentation(
+                presentationId, context, out retired, out replacement);
+
         internal static void ClearActiveMenuPresentation() =>
             ReactorRegistry.Instance.ClearActiveMenuPresentation();
 
@@ -1136,6 +1144,51 @@ namespace ReactorV.Integration
                 if (!CanMarkMenuPresentationReadyLocked(presentationId))
                     return false;
                 _activeMenuPresentation!.IsReady = true;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Replaces an un-dismissed active presentation with a fresh identity
+        /// for the same extension/menu. Renderer recovery must never re-arm
+        /// an old token: a delayed acknowledgement from its failed document
+        /// would otherwise be indistinguishable from the new paint attempt.
+        /// </summary>
+        public bool TryRestartActiveMenuPresentation(
+            string presentationId,
+            JObject context,
+            out JObject? retired,
+            out JObject? replacement)
+        {
+            retired = null;
+            replacement = null;
+            if (context == null || string.IsNullOrWhiteSpace(presentationId) ||
+                presentationId.Length > 128)
+                return false;
+
+            lock (_sync)
+            {
+                if (!_menuPresentationHostAvailable ||
+                    _activeMenuPresentation == null ||
+                    _activeMenuPresentation.IsDismissalRequested ||
+                    !string.Equals(
+                        _activeMenuPresentation.PresentationId,
+                        presentationId,
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var previous = _activeMenuPresentation;
+                retired = new ReactorMenuDismissalRecord(
+                    previous.ExtensionId,
+                    previous.MenuId,
+                    previous.PresentationId).ToJson();
+                _activeMenuPresentation = new ReactorMenuPresentationRecord(
+                    previous.ExtensionId,
+                    previous.MenuId,
+                    context);
+                replacement = _activeMenuPresentation.ToJson();
                 return true;
             }
         }

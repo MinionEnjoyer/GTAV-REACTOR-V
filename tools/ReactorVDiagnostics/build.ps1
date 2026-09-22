@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ReleaseVersion = '0.2.6',
+    [string]$ReleaseVersion = '0.2.8',
     [string]$PythonPath = 'python',
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\diagnostics')
 )

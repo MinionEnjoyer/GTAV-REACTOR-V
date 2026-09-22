@@ -185,6 +185,61 @@ public sealed class MenuPresentationPolicyTests
     }
 
     [Theory]
+    [InlineData(true, true, true, false, true, false, true)]
+    [InlineData(true, true, true, true, true, false, false)]
+    [InlineData(true, true, false, false, true, false, false)]
+    [InlineData(true, false, true, false, true, false, false)]
+    [InlineData(true, true, true, false, false, false, false)]
+    [InlineData(true, true, true, false, true, true, false)]
+    public void DelayedPresentationRecoveryWaitsForLifecycleSafetyNotTelemetry(
+        bool storyModeReady,
+        bool browserReady,
+        bool requestedVisible,
+        bool paused,
+        bool exactPresentationActive,
+        bool transferPending,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            MenuPresentationPolicy.ShouldRecoverDelayedPresentation(
+                storyModeReady,
+                browserReady,
+                requestedVisible,
+                paused,
+                exactPresentationActive,
+                transferPending));
+    }
+
+    [Fact]
+    public void DelayedPresentationCanRearmOnceButACancelledPresentationCannotAcceptLateReady()
+    {
+        const string presentationId = "delayed-presentation-1";
+        var gate = new MenuRevealGate(timeoutMilliseconds: 5);
+
+        gate.Begin(presentationId, dispatchedAtMilliseconds: 0);
+        Assert.True(gate.TryExpire(currentMilliseconds: 5, out var expired));
+        Assert.Equal(presentationId, expired);
+        Assert.True(MenuPresentationPolicy.ShouldRecoverDelayedPresentation(
+            storyModeReady: true,
+            browserReady: true,
+            overlayRequestedVisible: true,
+            gamePaused: false,
+            hasExactActivePresentation: true,
+            presentationTransferPending: false));
+
+        // The bounded lifecycle retry creates a fresh exact gate. A close
+        // between that rearm and a late browser acknowledgement invalidates
+        // it, so recovery cannot resurrect the intentionally closed menu.
+        gate.Begin(presentationId, dispatchedAtMilliseconds: 6);
+        gate.Cancel();
+        Assert.False(gate.TryAccept(
+            presentationId,
+            acknowledgedAtMilliseconds: 7,
+            out _));
+    }
+
+    [Theory]
     [InlineData(true, false, true)]
     [InlineData(true, true, false)]
     [InlineData(false, false, false)]

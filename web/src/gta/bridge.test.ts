@@ -27,6 +27,27 @@ afterEach(() => {
 })
 
 describe('GtaBridge', () => {
+  it.each(['web', 'gpu'])('rejects stale host surfaces and preserves the closed replay on %s', (prefix) => {
+    const transport = new FakeTransport()
+    const client = new GtaBridge(transport, true, prefix)
+    const listener = vi.fn()
+    client.on('host.surface', listener)
+    const surface = (mode: string, generation: number) =>
+      transport.receive({ kind: 'event', event: 'host.surface', payload: { mode, generation } })
+    surface('initializing', 4)
+    surface('none', 5)
+    surface('initializing', 4)
+    surface('initializing', 5)
+    surface('initializing', 0)
+    expect(listener).toHaveBeenCalledTimes(2)
+    const lateListener = vi.fn()
+    client.on('host.surface', lateListener, true)
+    expect(lateListener).toHaveBeenLastCalledWith({ mode: 'none', generation: 5 })
+    surface('initializing', 6)
+    expect(listener).toHaveBeenCalledTimes(3)
+    client.destroy()
+  })
+
   it('resolves a structurally valid matching response and sends a v2-compatible envelope', async () => {
     const transport = new FakeTransport()
     const client = new GtaBridge(transport, true)

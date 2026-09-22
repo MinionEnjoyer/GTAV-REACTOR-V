@@ -162,6 +162,25 @@ namespace RageWebUI.Script
             bool browserReady) =>
             storyModeReady && browserReady;
 
+        /// <summary>
+        /// A browser/document recovery invalidates the old paint proof, not
+        /// the extension's still-active menu intent. Replaying that exact
+        /// intent is safe only while the script still owns the requested
+        /// surface, no newer transfer is in flight, and GTA is not presenting
+        /// its own pause frontend. The caller keeps the retry pending while
+        /// paused, so resume is lifecycle-driven rather than telemetry-driven.
+        /// </summary>
+        internal static bool ShouldRecoverDelayedPresentation(
+            bool storyModeReady,
+            bool browserReady,
+            bool overlayRequestedVisible,
+            bool gamePaused,
+            bool hasExactActivePresentation,
+            bool presentationTransferPending) =>
+            storyModeReady && browserReady && overlayRequestedVisible &&
+            !gamePaused && hasExactActivePresentation &&
+            !presentationTransferPending;
+
         // The owner's physical-key poll can enqueue an opening before SHVDN
         // delivers Reactor's KeyDown. Sample the actual held key at dispatch,
         // not an extension-supplied claim or a guessed timestamp window. Never

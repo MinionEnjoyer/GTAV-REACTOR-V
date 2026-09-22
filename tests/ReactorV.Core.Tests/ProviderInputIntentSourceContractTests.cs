@@ -225,6 +225,8 @@ public sealed class ProviderInputIntentSourceContractTests
 
         Assert.Contains("if (!HasAuthoritativeHostSurfaceBoundary())", close);
         Assert.Contains("_overlay.PostEvent(\n                    \"host.surface\"", close);
+        Assert.Contains("[\"mode\"] = HostSurfaceMode.None", close);
+        Assert.Contains("[\"generation\"] = NextHostSurfaceGeneration()", close);
         Assert.Contains("_overlay.SetVisible(false);", close);
         Assert.Contains("IAuthoritativeHostSurfaceRuntime", runtime);
         Assert.Contains("HasAuthoritativeHostSurfaceBoundary", runtime);
@@ -232,6 +234,43 @@ public sealed class ProviderInputIntentSourceContractTests
         Assert.Contains(
             "public bool HasAuthoritativeHostSurfaceBoundary => true;",
             bootstrap);
+    }
+
+    [Fact]
+    public void EveryNonAuthoritativeHostSurfaceResetCarriesTheMonotonicGeneration()
+    {
+        var script = ReadRepositoryFile(
+            "src", "ReactorV.Script", "RageWebUiScript.cs");
+
+        // Windowed/direct renderers have no external bootstrap publisher.
+        // Their close, abort, and bootstrap-retirement resets must therefore
+        // cross OverlayWindow's high-watermark guard as new messages rather
+        // than relying on an unversioned compatibility escape hatch.
+        Assert.DoesNotContain(
+            "new JObject { [\"mode\"] = \"none\" }",
+            script);
+        Assert.Equal(
+            4,
+            CountOccurrences(
+                script,
+                "[\"mode\"] = HostSurfaceMode.None"));
+        Assert.Equal(
+            5,
+            CountOccurrences(
+                script,
+                "[\"generation\"] = NextHostSurfaceGeneration()"));
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = source.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+        return count;
     }
 
     private static string Region(string source, string startMarker, string endMarker)

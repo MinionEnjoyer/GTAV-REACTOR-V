@@ -11,6 +11,26 @@ namespace RageWebUI.Core.Tests
     public sealed class ExternalGpuBrowserSessionTests
     {
         [Fact]
+        public void Recovery_content_edges_reach_host_and_are_detached_after_dispose()
+        {
+            var producer = new FakeProducer();
+            var session = ExternalGpuBrowserSession.TryStart(true, CreateContext(),
+                new FakeFactory(producer), (_, __) => { });
+            Assert.NotNull(session);
+            var edges = new List<string>();
+            session!.ContentUnavailable += () => edges.Add("unavailable");
+            session.ContentReady += () => edges.Add("ready");
+            producer.RaiseContentUnavailable();
+            producer.RaiseContentReady();
+            producer.RaiseContentUnavailable();
+            producer.RaiseContentReady();
+            session.Dispose();
+            producer.RaiseContentUnavailable();
+            producer.RaiseContentReady();
+            Assert.Equal(new[] { "unavailable", "ready", "unavailable", "ready" }, edges);
+        }
+
+        [Fact]
         public void Default_off_gate_does_not_discover_or_start_a_producer()
         {
             var factory = new FakeFactory(new FakeProducer());

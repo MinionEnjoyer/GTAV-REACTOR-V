@@ -240,21 +240,41 @@ namespace RageWebUI.Runtime
             _passiveHudWatchdog = new System.Windows.Forms.Timer { Interval = 100 };
             _passiveHudWatchdog.Tick += (_, __) => ExpirePassiveHud();
             _passiveHudWatchdog.Start();
-            FormClosed += (_, __) =>
-            {
-                _passiveHudWatchdog.Dispose();
-                PublishHostSurfacePresentation(null);
-                _trace(
-                    "webview_shutdown_dispose_begin",
-                    $"input_parent=0x{_webViewInputParentWindow.ToInt64():X}");
-                _boundsTimer.Dispose();
-                DetachCoreHandlers();
-                DetachEnvironmentHandler();
-                _webView.Dispose();
-                ClearPendingMessages("window_closed");
-                _nativeRevealDrainCallbacks.Clear();
-                _trace("webview_shutdown_dispose_complete", "completed=True");
-            };
+            FormClosed += (_, __) => ReleaseWindowResources();
+        }
+
+        private bool _windowResourcesReleased;
+
+        private void ReleaseWindowResources()
+        {
+            if (_windowResourcesReleased) return;
+            _windowResourcesReleased = true;
+            _trace(
+                "webview_shutdown_dispose_begin",
+                $"input_parent=0x{_webViewInputParentWindow.ToInt64():X}");
+            _desiredVisible = false;
+            _actualVisible = false;
+            _revealPending = false;
+            _revealGeneration++;
+            _browserSurfaceHealthGeneration++;
+            _passiveHudWatchdog?.Dispose();
+            _boundsTimer?.Dispose();
+            PublishHostSurfacePresentation(null);
+            _visibilityChanged?.Invoke(false);
+            DetachCoreHandlers();
+            DetachEnvironmentHandler();
+            ClearPendingMessages("window_closed");
+            _nativeRevealDrainCallbacks.Clear();
+            _activeMenuPresentationId = null;
+            _activeMenuExtensionId = null;
+            _activeMenuId = null;
+            _pendingPresentationReadyRequestId = null;
+            _passiveHudLease.Clear();
+            _webView?.Dispose();
+            ProviderPresentationCommitted = null;
+            HostSurfacePresentationChanged = null;
+            PassiveHudLeaseExpired = null;
+            _trace("webview_shutdown_dispose_complete", "completed=True");
         }
 
         protected override bool ShowWithoutActivation => true;
@@ -263,8 +283,7 @@ namespace RageWebUI.Runtime
         {
             if (disposing)
             {
-                _passiveHudWatchdog?.Dispose();
-                PublishHostSurfacePresentation(null);
+                ReleaseWindowResources();
             }
             base.Dispose(disposing);
         }
@@ -1541,6 +1560,22 @@ namespace RageWebUI.Runtime
                         recovering: false));
         }
 
+        private readonly HostSurfaceSequence _hostSurfaceSequence = new HostSurfaceSequence();
+
+        private bool AcceptHostSurfaceMessage(string json)
+        {
+            var message = JObject.Parse(json);
+            if (message.Value<string>("kind") != "event" ||
+                message.Value<string>("event") != "host.surface") return true;
+            var payload = message["payload"] as JObject;
+            var generation = payload?.Value<int?>("generation") ?? 0;
+            var mode = payload?.Value<string>("mode") ?? HostSurfaceMode.None;
+            if (_hostSurfaceSequence.TryAccept(mode, generation)) return true;
+            _trace("webview_host_surface_rejected",
+                $"mode={mode} generation={generation} current={_hostSurfaceSequence.Generation}");
+            return false;
+        }
+
         public void PostJson(string json)
         {
             if (IsDisposed || Disposing || _webView.IsDisposed)
@@ -1567,6 +1602,7 @@ namespace RageWebUI.Runtime
             // presentationReady response. The browser changes from the
             // initializer to the provider tree only after receiving that
             // response; proving paint before this call fences the old frame.
+            if (!AcceptHostSurfaceMessage(json)) return;
             core.PostWebMessageAsJson(json);
             ObserveHostMessage(json);
         }
@@ -1704,10 +1740,8 @@ namespace RageWebUI.Runtime
                                 _passiveHudLease.Clear();
                                 _desiredVisible = false;
                                 ApplyVisibility(false);
-                                // A reloaded provider starts its counter again.
-                                // Do not mistake its first HUD for a duplicate of
-                                // the disconnected provider's expired surface.
-                                _activeHostSurfaceGeneration = 0;
+                                // Keep the host's high watermark across reconnect.
+                                // Preloader generations outlive provider sessions.
                             }
                             _providerInputIntentGate.RevokeProviderSession(
                                 sessionGeneration);
@@ -2694,6 +2728,7 @@ namespace RageWebUI.Runtime
             while (_pendingMessages.Count > 0)
             {
                 var json = _pendingMessages.Dequeue();
+                if (!AcceptHostSurfaceMessage(json)) continue;
                 core.PostWebMessageAsJson(json);
                 ObserveHostMessage(json);
             }

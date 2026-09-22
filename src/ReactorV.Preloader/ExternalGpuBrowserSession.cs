@@ -155,6 +155,8 @@ namespace ReactorV.Preloader
             (_producer as IResizableExternalGpuBrowserProducer)?.SurfaceHeight ?? 0;
 
         public event Action? Unavailable;
+        public event Action? ContentReady;
+        public event Action? ContentUnavailable;
         public event Action<bool, int, int>? PresentationReadinessChanged;
 
         public static ExternalGpuBrowserSession? TryStart(
@@ -390,16 +392,22 @@ namespace ReactorV.Preloader
 
         private void OnContentReady()
         {
+            if (!IsActive || Volatile.Read(ref _disposed) != 0) return;
             _trace(
                 "external_gpu_browser_shadow_content_ready",
                 $"renderer={_rendererName} authority=shadow-only " +
                 $"presentation_ready={IsPresentationReady} " +
                 $"surface={SurfaceWidth}x{SurfaceHeight}");
+            ContentReady?.Invoke();
         }
 
-        private void OnContentUnavailable() => _trace(
-            "external_gpu_browser_shadow_content_unavailable",
-            $"renderer={_rendererName} fallback=webview2");
+        private void OnContentUnavailable()
+        {
+            if (!IsActive || Volatile.Read(ref _disposed) != 0) return;
+            _trace("external_gpu_browser_shadow_content_unavailable",
+                $"renderer={_rendererName} fallback=webview2");
+            ContentUnavailable?.Invoke();
+        }
 
         private void OnPresentationReadinessChanged(
             bool ready,

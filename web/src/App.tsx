@@ -30,7 +30,7 @@ import { ReactorAboutSurface } from './menu/ReactorAboutSurface'
 import { StartupTransitionSurface } from './menu/StartupTransitionSurface'
 import { parseMenuDismissal, parseMenuPresentation, type MenuPresentation } from './menu/presentation'
 import { resolveVisiblePaintIdentity } from './paintIdentity'
-import { Speedometer, useSpeedometer } from './hud/Speedometer'
+import { PassiveHud, usePassiveHud } from './hud/FpvHud'
 import {
   createStartupFallbackStatus,
   parseStartupStatus,
@@ -60,7 +60,7 @@ const initialBrowserRole = browserRoleFromLocation(
 function App() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
   const [telemetry, setTelemetry] = useState<GameState | null>(null)
-  const speedometer = useSpeedometer(bridge)
+  const passiveHud = usePassiveHud(bridge)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [presentation, setPresentation] = useState<MenuPresentation | null>(null)
@@ -873,7 +873,7 @@ function App() {
   }
 
   if (surfaceView === 'passive-hud') {
-    return <><PaintIdentityMarker identity={visiblePaintIdentity} />{speedometer && <Speedometer frame={speedometer} />}</>
+    return <><PaintIdentityMarker identity={visiblePaintIdentity} />{passiveHud && <PassiveHud frame={passiveHud} />}</>
   }
 
   if (surfaceView === 'transparent') {

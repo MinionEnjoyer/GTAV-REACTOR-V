@@ -28,7 +28,10 @@ namespace RageWebUI.DirectX.Browser
         private readonly Stopwatch _startupTimer = Stopwatch.StartNew();
         private readonly object _postJsonSync = new object();
         private readonly Queue<string> _pendingPostJson = new Queue<string>();
-        private ulong _frameGeneration;
+        private long _frameGeneration;
+        private readonly Func<ulong>? _frameGenerationSource;
+        private readonly Func<bool>? _frameAcceptance;
+        private readonly Func<MonotonicGenerationEpochGate.SubmissionLease?>? _submissionLeaseSource;
         private bool _disposed;
         private bool _documentReady;
         private bool _desiredVisible;
@@ -78,9 +81,15 @@ namespace RageWebUI.DirectX.Browser
             bool allowAcceleratedBootstrapProbe = false,
             bool forceCpuRendering = false,
             string browserRole = "primary",
-            GpuAdapterLuid? adapterLuid = null)
+            GpuAdapterLuid? adapterLuid = null,
+            Func<ulong>? frameGenerationSource = null,
+            Func<bool>? frameAcceptance = null,
+            Func<MonotonicGenerationEpochGate.SubmissionLease?>? submissionLeaseSource = null)
         {
             _bridgeSink = bridgeSink ?? throw new ArgumentNullException(nameof(bridgeSink));
+            _frameGenerationSource = frameGenerationSource;
+            _frameAcceptance = frameAcceptance;
+            _submissionLeaseSource = submissionLeaseSource;
             _desiredVisible = startVisible;
             _logDirectory = Path.GetDirectoryName(cacheDirectory) ?? cacheDirectory;
             _surfaceWidth = Math.Max(1, width);
@@ -133,7 +142,10 @@ namespace RageWebUI.DirectX.Browser
                 _browser.RenderHandler = new AcceleratedRenderHandler(
                     _browser,
                     _acceleratedSubmitter,
-                    OnAcceleratedPaintObserved);
+                    OnAcceleratedPaintObserved,
+                    NextFrameGeneration,
+                    AcceptsFrame,
+                    _submissionLeaseSource);
             }
             else
             {
@@ -141,28 +153,12 @@ namespace RageWebUI.DirectX.Browser
             }
             _browser.JavascriptMessageReceived += OnJavascriptMessageReceived;
             _browser.LoadingStateChanged += OnLoadingStateChanged;
+            _browser.BrowserInitialized += OnBrowserInitialized;
 
             var windowInfo = new WindowInfo();
             windowInfo.SetAsWindowless(parentWindow);
             windowInfo.SharedTextureEnabled = _acceleratedRendering;
             _browser.CreateBrowser(windowInfo, browserSettings);
-            _browser.BrowserInitialized += (_, __) =>
-            {
-                if (_disposed || !_browser.IsBrowserInitialized) return;
-                StartupTrace.Write(
-                    _logDirectory,
-                    "reactorv-runtime.log",
-                    "directx",
-                    "browser_initialized",
-                    $"duration_ms={_startupTimer.Elapsed.TotalMilliseconds:F3}");
-                var host = _browser.GetBrowser().GetHost();
-                host.NotifyMoveOrResizeStarted();
-                host.WasResized();
-                host.WasHidden(!_desiredVisible);
-                if (_desiredVisible) host.Invalidate(PaintElementType.View);
-                // DevTools remain callable through CefSharp APIs when enabled;
-                // no eager DevTools window is needed for preload.
-            };
         }
 
         public bool Resize(int width, int height)
@@ -378,13 +374,32 @@ namespace RageWebUI.DirectX.Browser
             if (!_acceleratedRendering) _browser.Paint -= OnPaint;
             _browser.JavascriptMessageReceived -= OnJavascriptMessageReceived;
             _browser.LoadingStateChanged -= OnLoadingStateChanged;
+            _browser.BrowserInitialized -= OnBrowserInitialized;
             _browser.Dispose();
             _requestContext.Dispose();
         }
 
+        private void OnBrowserInitialized(object? sender, EventArgs args)
+        {
+            if (_disposed || !_browser.IsBrowserInitialized) return;
+            StartupTrace.Write(
+                _logDirectory,
+                "reactorv-runtime.log",
+                "directx",
+                "browser_initialized",
+                $"duration_ms={_startupTimer.Elapsed.TotalMilliseconds:F3}");
+            var host = _browser.GetBrowser().GetHost();
+            host.NotifyMoveOrResizeStarted();
+            host.WasResized();
+            host.WasHidden(!_desiredVisible);
+            if (_desiredVisible) host.Invalidate(PaintElementType.View);
+            // DevTools remain callable through CefSharp APIs when enabled;
+            // no eager DevTools window is needed for preload.
+        }
+
         private void OnPaint(object? sender, OnPaintEventArgs args)
         {
-            if (args.IsPopup || _disposed) return;
+            if (args.IsPopup || _disposed || !AcceptsFrame()) return;
             args.Handled = false;
             try
             {
@@ -393,7 +408,7 @@ namespace RageWebUI.DirectX.Browser
                     args.Width,
                     args.Height,
                     checked(args.Width * 4),
-                    ++_frameGeneration);
+                    NextFrameGeneration());
             }
             catch (Exception)
             {
@@ -402,6 +417,16 @@ namespace RageWebUI.DirectX.Browser
                 // deterministic fail-open behavior for this frame.
                 args.Handled = false;
             }
+        }
+
+        private ulong NextFrameGeneration() => _frameGenerationSource?.Invoke() ??
+            unchecked((ulong)System.Threading.Interlocked.Increment(ref _frameGeneration));
+
+        private bool AcceptsFrame()
+        {
+            if (_disposed) return false;
+            try { return _frameAcceptance?.Invoke() != false; }
+            catch { return false; }
         }
 
         private void OnLoadingStateChanged(object? sender, LoadingStateChangedEventArgs args)

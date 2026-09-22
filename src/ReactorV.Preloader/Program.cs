@@ -179,6 +179,7 @@ namespace ReactorV.Preloader
         private readonly BootstrapOverlayServer? _hostServer;
         private readonly ExternalGpuBrowserSession? _externalGpuBrowserSession;
         private readonly bool _requireNativePresenter;
+        private readonly PassiveHudGenerationMap _passiveHudGenerations = new PassiveHudGenerationMap();
         private readonly DeferredNativeSurfaceIntent _deferredNativeSurfaceIntent =
             new DeferredNativeSurfaceIntent();
         private readonly EventWaitHandle? _hostToggle;
@@ -220,6 +221,7 @@ namespace ReactorV.Preloader
         private bool _stopping;
         private string _hostSurfaceMode = "none";
         private int _hostSurfaceGeneration;
+        private bool _externalContentRecoveryPending;
         private int _pendingHostSurfaceGeneration;
         private int _hostSurfacePixelVerificationGeneration;
         private int _webViewInitializerReadyGeneration;
@@ -310,6 +312,14 @@ namespace ReactorV.Preloader
                     if (!_requireNativePresenter)
                         _hostServer.PublishProviderPresentationCommitted(presentationId,
                             _hostWindow.IsProviderPresentationAuthorizedByUserIntent(presentationId));
+                };
+                _hostWindow.HostSurfacePresentationChanged += receipt =>
+                    _hostServer.PublishHostSurfacePresentation(
+                        _passiveHudGenerations.ToProviderReceipt(receipt));
+                _hostWindow.PassiveHudLeaseExpired += generation =>
+                {
+                    if (_hostSurfaceMode == HostSurfaceMode.PassiveHud && _hostSurfaceGeneration == generation)
+                        RetireBootstrapSurface(_hostWindow, hide: true);
                 };
                 _hostServer.DualBrowserPresentationReady +=
                     (presentationId, providerSessionGeneration) => InvokeHost(
@@ -453,8 +463,16 @@ namespace ReactorV.Preloader
                         message["payload"]?.Value<string>("mode") == HostSurfaceMode.PassiveHud)
                     {
                         if (_hostServer.IsConnected && (_hostSurfaceMode == HostSurfaceMode.None ||
-                            _hostSurfaceMode == HostSurfaceMode.PassiveHud))
+                            _hostSurfaceMode == HostSurfaceMode.PassiveHud) &&
+                            _passiveHudGenerations.BeginRequest(message["payload"] as JObject))
                             RequestHostSurface(window, HostSurfaceMode.PassiveHud, true);
+                        return;
+                    }
+                    if (message.Value<string>("event") == PassiveHudContract.EventId)
+                    {
+                        var frame = _passiveHudGenerations.ToHostFrame(message["payload"] as JObject);
+                        if (frame != null)
+                            PostBrowserJson(window, BridgeProtocol.SerializeEvent(PassiveHudContract.EventId, frame));
                         return;
                     }
                     PostBrowserJson(window, json);
@@ -463,6 +481,7 @@ namespace ReactorV.Preloader
                     QueueHostPointerInput(x, y, pressed, released, wheel);
                 _hostServer.ProviderConnected += () => InvokeHost(window =>
                 {
+                    _passiveHudGenerations.Clear();
                     // Keep an already visible transition surface in place
                     // until the provider presents its real menu. Hiding here
                     // creates a blank/flickering handoff during slow startup.
@@ -486,7 +505,9 @@ namespace ReactorV.Preloader
                 }, signalRevealIngress: true);
                 _hostServer.ProviderDisconnected += () => InvokeHost(window =>
                 {
-                    // An old provider's ready callback must not revive its surface.
+                    _passiveHudGenerations.Clear();
+                    // A native-ready callback from the old provider/session
+                    // must never revive a surface after its owner is gone.
                     if (_deferredNativeSurfaceIntent.IsPending)
                         CancelPendingHostSurfaceReveal("provider-disconnected");
                     if (_hostSurfaceMode == HostSurfaceMode.PassiveHud)
@@ -707,6 +728,28 @@ namespace ReactorV.Preloader
                              Program.Trace(_logDirectory, stage, detail));
                     if (_externalGpuBrowserSession != null)
                     {
+                        _externalGpuBrowserSession.ContentUnavailable += () => InvokeHost(window =>
+                        {
+                            if (_externalContentRecoveryPending ||
+                                (!_requireNativePresenter && !_browserPresentation.ExternalGpuVisible &&
+                                 _pendingHostSurfaceGeneration == 0)) return;
+                            _externalContentRecoveryPending = true;
+                            // The selected renderer lost its document. Keep
+                            // the pipe, but invalidate the managed paint lease
+                            // so menu recovery receives a new identity too.
+                            _hostServer.MarkContentUnavailable();
+                            ResetExternalInitializerReadiness();
+                            if (IsNativeBootstrapSurface(_hostSurfaceMode) &&
+                                (_browserPresentationRequestedVisible || _pendingHostSurfaceGeneration > 0))
+                                RequestHostSurface(window, _hostSurfaceMode, visible: true);
+                        });
+                        _externalGpuBrowserSession.ContentReady += () => InvokeHost(window =>
+                        {
+                            if (!_externalContentRecoveryPending || !_contentReady ||
+                                _externalGpuBrowserSession?.IsPresentationReady != true) return;
+                            _externalContentRecoveryPending = false;
+                            _hostServer.MarkContentReady();
+                        });
                         _externalGpuBrowserSession.Unavailable += () =>
                             InvokeHost(window =>
                             {
@@ -988,7 +1031,11 @@ namespace ReactorV.Preloader
                     _hostWindow,
                     _hostServer.IsConnected,
                     Volatile.Read(ref _providerSessionGeneration));
-                _hostServer.MarkContentReady();
+                if (_externalContentRecoveryPending &&
+                    _externalGpuBrowserSession?.IsPresentationReady == true)
+                    _externalContentRecoveryPending = false;
+                if (!_externalContentRecoveryPending)
+                    _hostServer.MarkContentReady();
                 Program.Trace(
                     _logDirectory,
                     "bootstrap_host_state_replayed",
@@ -2357,7 +2404,7 @@ namespace ReactorV.Preloader
             string? hostMessageIngress = null)
         {
             var window = _hostWindow;
-            if (window == null || window.IsDisposed || !window.IsHandleCreated) return false;
+            if (_disposed || _stopping || window == null || window.IsDisposed || !window.IsHandleCreated) return false;
             var ingressAnnouncements = 0;
             try
             {
@@ -2382,6 +2429,8 @@ namespace ReactorV.Preloader
                 window.BeginInvoke(
                     (Action<OverlayWindow>)(queuedWindow =>
                     {
+                        if (_disposed || _stopping || queuedWindow.IsDisposed ||
+                            !ReferenceEquals(_hostWindow, queuedWindow)) return;
                         if (ingressAnnouncements > 0)
                             queuedWindow.ApplyRevealIngress(ingressAnnouncements);
                         try
@@ -2515,7 +2564,9 @@ namespace ReactorV.Preloader
                     _hostServer?.IsVisible == true,
                     _hostSurfaceMode,
                     _hostServer?.IsConnected == true));
-            var generation = ++_hostSurfaceGeneration;
+            var generation = checked(++_hostSurfaceGeneration);
+            _passiveHudGenerations.BindSurface(_hostSurfaceMode, generation);
+            _hostServer?.PublishHostSurfacePresentation(null);
             _webViewInitializerReadyGeneration = 0;
             ResetExternalInitializerReadiness();
             _hostServer?.PublishSurfaceMode(_hostSurfaceMode);
@@ -2592,7 +2643,8 @@ namespace ReactorV.Preloader
                     _hostSurfaceMode,
                     mode);
             var generation = PostHostSurface(window, mode);
-            // A new publication supersedes the older deferred identity.
+            // Every new publication supersedes an older deferred identity,
+            // including a transition to a non-native/WebView surface.
             _deferredNativeSurfaceIntent.Clear();
             if (!visible)
             {
@@ -2845,6 +2897,22 @@ namespace ReactorV.Preloader
             int width,
             int height)
         {
+            if (DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
+                    ready, _browserPresentationRequestedVisible,
+                    IsNativeBootstrapSurface(_hostSurfaceMode),
+                    _hostSurfaceGeneration, _pendingHostSurfaceGeneration))
+            {
+                // A previously displayed surface lost its renderer. Retire its
+                // paint proof and start one new identity through the existing
+                // deferred-ready and bounded paint-deadline path. Repeated
+                // unavailable edges cannot restart that budget, and a closed
+                // surface cannot be resurrected by the subsequent ready edge.
+                var mode = _hostSurfaceMode;
+                _hostServer?.PublishHostSurfacePresentation(null);
+                _externalGpuBrowserSession?.SetVisible(false);
+                RequestHostSurface(window, mode, visible: true);
+                return;
+            }
             var generation = _externalInitializerRefreshGeneration;
             if (!ready || generation <= 0 ||
                 generation != _pendingHostSurfaceGeneration ||
@@ -2975,6 +3043,11 @@ namespace ReactorV.Preloader
                     _hostSurfaceMode,
                     _hostServer?.IsConnected == true));
             SetBrowserVisible(window, true, trigger);
+            // The native route has its own exact-generation fresh-frame gate
+            // above, not an external-HWND desktop witness. Keep that boundary.
+            if (mode == HostSurfaceMode.PassiveHud && _browserPresentation.ExternalGpuVisible)
+                _hostServer?.PublishHostSurfacePresentation(_passiveHudGenerations.ToProviderReceipt(
+                    new HostSurfacePresentation(mode, generation)));
             return true;
         }
 
@@ -3002,7 +3075,9 @@ namespace ReactorV.Preloader
                     generation,
                     Volatile.Read(ref _providerSessionGeneration),
                     _externalGpuBrowserSession?.IsPresentationReady == true))
+            {
                 return;
+            }
 
             _pendingHostSurfaceExpiresAt = _lifetime.Elapsed + HostSurfaceReadyDeadline;
             Program.Trace(
@@ -3010,8 +3085,10 @@ namespace ReactorV.Preloader
                 "bootstrap_host_native_surface_resumed",
                 $"mode={mode} generation={generation} " +
                 $"deadline_ms={HostSurfaceReadyDeadline.TotalMilliseconds:F0}");
-            // Renderer readiness is not an acknowledgement of browser content.
-            // Publish a fresh generation through the normal exact ACK/frame gate.
+            // Do not manufacture an external/browser acknowledgement from the
+            // renderer's ready edge. Re-publish a fresh surface generation so
+            // WebView's exact host.surface ACK and the native fresh-frame
+            // contract execute in their normal order.
             RequestHostSurface(window, mode, visible: true);
         }
 
@@ -3023,7 +3100,9 @@ namespace ReactorV.Preloader
                 !IsNativeBootstrapSurface(_pendingHostSurfaceMode) ||
                 !_options.ExternalGpuBrowserShadow ||
                 _options.BootstrapHarnessWebViewPresenter)
+            {
                 return;
+            }
 
             var mode = _pendingHostSurfaceMode;
             var generation = _pendingHostSurfaceGeneration;
