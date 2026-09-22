@@ -2897,10 +2897,22 @@ namespace ReactorV.Preloader
             int width,
             int height)
         {
+            // Once an authenticated provider presentation has been accepted,
+            // its post-accept paint is the pending replacement. A transient
+            // shadow-ready=false notification must not republish the old
+            // initializer identity between that acceptance and its paint:
+            // doing so revokes the exact provider handoff the host is waiting
+            // to acknowledge.
+            var providerPresentationPending =
+                ProviderPresentationCommitContract.IsValidPresentationId(
+                    _awaitingExternalPostAcceptPaintPresentationId) ||
+                ProviderPresentationCommitContract.IsValidPresentationId(
+                    _externalReplacementPresentationId);
             if (DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
                     ready, _browserPresentationRequestedVisible,
                     IsNativeBootstrapSurface(_hostSurfaceMode),
-                    _hostSurfaceGeneration, _pendingHostSurfaceGeneration))
+                    _hostSurfaceGeneration, _pendingHostSurfaceGeneration) &&
+                !providerPresentationPending)
             {
                 // A previously displayed surface lost its renderer. Retire its
                 // paint proof and start one new identity through the existing
