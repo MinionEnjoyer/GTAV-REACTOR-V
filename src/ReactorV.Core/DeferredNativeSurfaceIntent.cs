@@ -47,9 +47,11 @@ namespace RageWebUI.Core
             bool requestedVisible,
             bool nativeSurface,
             int publishedGeneration,
-            int pendingGeneration) =>
+            int pendingGeneration,
+            bool providerPresentationPending = false) =>
             !nativePresenterReady && requestedVisible && nativeSurface &&
-            publishedGeneration > 0 && pendingGeneration == 0;
+            publishedGeneration > 0 && pendingGeneration == 0 &&
+            !providerPresentationPending;
 
         public void Defer(string mode, int generation, int providerSessionGeneration)
         {

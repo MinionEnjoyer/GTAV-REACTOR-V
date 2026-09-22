@@ -83,5 +83,18 @@ namespace ReactorV.Core.Tests
                     externalSessionActive: true,
                     externalPresentationReady: false));
         }
+
+        [Fact]
+        public void Published_initializer_reproves_after_idle_renderer_loss_but_not_during_provider_handoff()
+        {
+            Assert.True(DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
+                nativePresenterReady: false, requestedVisible: true,
+                nativeSurface: true, publishedGeneration: 7, pendingGeneration: 0));
+
+            Assert.False(DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
+                nativePresenterReady: false, requestedVisible: true,
+                nativeSurface: true, publishedGeneration: 7, pendingGeneration: 0,
+                providerPresentationPending: true));
+        }
     }
 }

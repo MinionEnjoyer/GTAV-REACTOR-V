@@ -2897,6 +2897,15 @@ namespace ReactorV.Preloader
             int width,
             int height)
         {
+            if (!ready)
+            {
+                // A retained external replacement is no longer a viable
+                // presentation once its producer reports loss. Keep only the
+                // exact post-accept paint wait, which has its own bounded
+                // completion/revocation path; a stale replacement ID must
+                // never suppress a later ordinary initializer recovery.
+                _externalReplacementPresentationId = null;
+            }
             // Once an authenticated provider presentation has been accepted,
             // its post-accept paint is the pending replacement. A transient
             // shadow-ready=false notification must not republish the old
@@ -2911,8 +2920,8 @@ namespace ReactorV.Preloader
             if (DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
                     ready, _browserPresentationRequestedVisible,
                     IsNativeBootstrapSurface(_hostSurfaceMode),
-                    _hostSurfaceGeneration, _pendingHostSurfaceGeneration) &&
-                !providerPresentationPending)
+                    _hostSurfaceGeneration, _pendingHostSurfaceGeneration,
+                    providerPresentationPending))
             {
                 // A previously displayed surface lost its renderer. Retire its
                 // paint proof and start one new identity through the existing
