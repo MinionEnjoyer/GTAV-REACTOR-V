@@ -102,12 +102,40 @@ namespace RageWebUI.Harness
                     throw new InvalidOperationException("Synthetic host lost foreground before reveal.");
                 runtime.SetVisible(true);
                 Until(() => runtime.IsVisible, "Menu did not become visible: " + menu);
-                Settle(350);
-                using var image = capture.Capture(host);
-                var measured = GbayLifecycleHarness.VisualFrame.Measure(image);
-                if (measured.ChangedFraction < .04 || measured.BlackFraction > .9)
+                // A presentation-ready acknowledgement proves the browser has
+                // committed its identity, not that a synthetic-host PrintWindow
+                // sample can observe its first composited pixel in the same
+                // message turn. Require a concrete visual frame within a
+                // bounded interval instead of treating one 350 ms sample as
+                // product evidence. This does not accept a blank/black frame;
+                // it fails if no qualifying frame is ever captured.
+                var paintDeadline = Stopwatch.StartNew();
+                Bitmap? image = null;
+                while (paintDeadline.Elapsed < TimeSpan.FromMilliseconds(1200))
+                {
+                    Pump();
+                    if (!capture.CanCapture(host))
+                    {
+                        Thread.Sleep(10);
+                        continue;
+                    }
+
+                    var candidate = capture.Capture(host);
+                    var candidateMeasured = GbayLifecycleHarness.VisualFrame.Measure(candidate);
+                    if (candidateMeasured.ChangedFraction >= .04 &&
+                        candidateMeasured.BlackFraction <= .9)
+                    {
+                        image = candidate;
+                        break;
+                    }
+
+                    candidate.Dispose();
+                    Thread.Sleep(10);
+                }
+                if (image == null)
                     throw new InvalidOperationException("Unpainted or black prefab: " + menu);
-                image.Save(Path.Combine(directory, menu + (side ? "-side" : "") + ".png"));
+                using (image)
+                    image.Save(Path.Combine(directory, menu + (side ? "-side" : "") + ".png"));
             }
             if (!runtime.Start()) throw new InvalidOperationException("Runtime start failed.");
             Settle(1200);
