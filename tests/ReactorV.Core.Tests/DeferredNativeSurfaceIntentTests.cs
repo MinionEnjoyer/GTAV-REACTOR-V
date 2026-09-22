@@ -1,4 +1,5 @@
 using RageWebUI.Core;
+using System;
 using Xunit;
 
 namespace ReactorV.Core.Tests
@@ -95,6 +96,17 @@ namespace ReactorV.Core.Tests
                 nativePresenterReady: false, requestedVisible: true,
                 nativeSurface: true, publishedGeneration: 7, pendingGeneration: 0,
                 providerPresentationPending: true));
+        }
+
+        [Fact]
+        public void Provider_fence_requires_current_connected_unexpired_identity()
+        {
+            var expires = TimeSpan.FromSeconds(5);
+            Assert.True(DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(true, 4, "handoff", 4, expires, TimeSpan.FromSeconds(4)));
+            Assert.False(DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(false, 4, "handoff", 4, expires, TimeSpan.FromSeconds(4)));
+            Assert.False(DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(true, 5, "handoff", 4, expires, TimeSpan.FromSeconds(4)));
+            Assert.False(DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(true, 4, "handoff", 4, expires, expires));
+            Assert.False(DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(true, 4, "handoff", 4, TimeSpan.Zero, TimeSpan.Zero));
         }
     }
 }

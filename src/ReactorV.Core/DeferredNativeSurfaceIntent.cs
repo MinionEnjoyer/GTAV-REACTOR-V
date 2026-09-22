@@ -53,6 +53,13 @@ namespace RageWebUI.Core
             publishedGeneration > 0 && pendingGeneration == 0 &&
             !providerPresentationPending;
 
+        public static bool HasCurrentProviderPresentationFence(
+            bool connected, int currentSession, string? presentationId,
+            int presentationSession, TimeSpan expiresAt, TimeSpan now) =>
+            connected && currentSession == presentationSession &&
+            ProviderPresentationCommitContract.IsValidPresentationId(presentationId) &&
+            expiresAt != TimeSpan.Zero && now < expiresAt;
+
         public void Defer(string mode, int generation, int providerSessionGeneration)
         {
             if (string.IsNullOrWhiteSpace(mode)) throw new ArgumentException("A mode is required.", nameof(mode));

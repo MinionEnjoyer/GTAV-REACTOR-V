@@ -242,6 +242,7 @@ namespace ReactorV.Preloader
         private int _dualBrowserReadyProviderSessionGeneration;
         private string? _awaitingExternalPostAcceptPaintPresentationId;
         private int _awaitingExternalPostAcceptPaintProviderSessionGeneration;
+        private TimeSpan _externalProviderPresentationFenceExpiresAt;
         private string? _externalFreshPresentationId;
         private string? _externalCommittedPresentationId;
         private string? _externalReplacementPresentationId;
@@ -494,6 +495,7 @@ namespace ReactorV.Preloader
                     _dualBrowserReadyProviderSessionGeneration = 0;
                     _awaitingExternalPostAcceptPaintPresentationId = null;
                     _awaitingExternalPostAcceptPaintProviderSessionGeneration = 0;
+                    _externalProviderPresentationFenceExpiresAt = TimeSpan.Zero;
                     _externalFreshPresentationId = null;
                     _externalCommittedPresentationId = null;
                     _externalReplacementPresentationId = null;
@@ -531,6 +533,7 @@ namespace ReactorV.Preloader
                     _dualBrowserReadyProviderSessionGeneration = 0;
                     _awaitingExternalPostAcceptPaintPresentationId = null;
                     _awaitingExternalPostAcceptPaintProviderSessionGeneration = 0;
+                    _externalProviderPresentationFenceExpiresAt = TimeSpan.Zero;
                     _externalFreshPresentationId = null;
                     _externalCommittedPresentationId = null;
                     _externalReplacementPresentationId = null;
@@ -1193,6 +1196,7 @@ namespace ReactorV.Preloader
                 {
                     HandleHostSurfaceReadyDeadline();
                 }
+                ExpireExternalProviderPresentationFence();
                 return;
             }
 
@@ -2913,10 +2917,13 @@ namespace ReactorV.Preloader
             // doing so revokes the exact provider handoff the host is waiting
             // to acknowledge.
             var providerPresentationPending =
-                ProviderPresentationCommitContract.IsValidPresentationId(
-                    _awaitingExternalPostAcceptPaintPresentationId) ||
-                ProviderPresentationCommitContract.IsValidPresentationId(
-                    _externalReplacementPresentationId) ||
+                DeferredNativeSurfaceIntent.HasCurrentProviderPresentationFence(
+                    _hostServer?.IsConnected == true,
+                    Volatile.Read(ref _providerSessionGeneration),
+                    _awaitingExternalPostAcceptPaintPresentationId,
+                    _awaitingExternalPostAcceptPaintProviderSessionGeneration,
+                    _externalProviderPresentationFenceExpiresAt,
+                    _lifetime.Elapsed) ||
                 // The post-accept callback clears its awaiting field before
                 // starting the exact-ID external refresh. During that narrow
                 // fresh-frame interval there is no retained replacement yet,
@@ -2926,6 +2933,9 @@ namespace ReactorV.Preloader
                 // stale dual-browser evidence cannot hold recovery open.
                 (_dualBrowserReadyProviderSessionGeneration ==
                      Volatile.Read(ref _providerSessionGeneration) &&
+                 _hostServer?.IsConnected == true &&
+                 _externalProviderPresentationFenceExpiresAt != TimeSpan.Zero &&
+                 _lifetime.Elapsed < _externalProviderPresentationFenceExpiresAt &&
                  ProviderPresentationCommitContract.IsValidPresentationId(
                      _dualBrowserReadyPresentationId) &&
                  string.Equals(
@@ -3324,6 +3334,26 @@ namespace ReactorV.Preloader
                 $"pid={_targetProcess?.Id ?? 0}");
         }
 
+        private void ExpireExternalProviderPresentationFence()
+        {
+            if (_externalProviderPresentationFenceExpiresAt == TimeSpan.Zero ||
+                _lifetime.Elapsed < _externalProviderPresentationFenceExpiresAt)
+                return;
+            var expired = _awaitingExternalPostAcceptPaintPresentationId ?? _dualBrowserReadyPresentationId;
+            _externalProviderPresentationFenceExpiresAt = TimeSpan.Zero;
+            _awaitingExternalPostAcceptPaintPresentationId = null;
+            _awaitingExternalPostAcceptPaintProviderSessionGeneration = 0;
+            _dualBrowserReadyPresentationId = null;
+            _dualBrowserReadyProviderSessionGeneration = 0;
+            _externalFreshPresentationId = null;
+            _externalReplacementPresentationId = null;
+            Program.Trace(_logDirectory, "external_gpu_provider_fence_expired",
+                $"presentation={expired ?? "none"}");
+            if (_hostWindow != null && IsNativeBootstrapSurface(_hostSurfaceMode) &&
+                _browserPresentationRequestedVisible)
+                RequestHostSurface(_hostWindow, _hostSurfaceMode, visible: true);
+        }
+
         private string? ResolveGameEdition()
         {
             var processName = _targetProcess?.ProcessName ?? _options.WaitForProcess ?? string.Empty;
@@ -3628,6 +3658,7 @@ namespace ReactorV.Preloader
             _dualBrowserReadyProviderSessionGeneration = 0;
             _awaitingExternalPostAcceptPaintPresentationId = null;
             _awaitingExternalPostAcceptPaintProviderSessionGeneration = 0;
+            _externalProviderPresentationFenceExpiresAt = TimeSpan.Zero;
             _externalFreshPresentationId = null;
             _externalCommittedPresentationId = null;
             _externalReplacementPresentationId = null;
@@ -3788,6 +3819,8 @@ namespace ReactorV.Preloader
             _awaitingExternalPostAcceptPaintPresentationId = presentationId;
             _awaitingExternalPostAcceptPaintProviderSessionGeneration =
                 providerSessionGeneration;
+            _externalProviderPresentationFenceExpiresAt =
+                _lifetime.Elapsed + TimeSpan.FromSeconds(5);
             Program.Trace(
                 _logDirectory,
                 "external_gpu_provider_exact_id_awaiting_post_accept_paint",
@@ -4038,6 +4071,10 @@ namespace ReactorV.Preloader
             }
 
             _externalCommittedPresentationId = presentationId;
+            // A matching exact identity is now committed. The expiry fence
+            // protects only the pre-commit transition and must never later
+            // retire an already-qualified provider surface.
+            _externalProviderPresentationFenceExpiresAt = TimeSpan.Zero;
             if (hiddenPreparationCommit)
                 _hiddenExternalPreparationPresentationId = null;
             var userIntentAuthorized =
