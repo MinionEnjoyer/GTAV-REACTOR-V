@@ -264,6 +264,94 @@
           "length": 361
         }
       ]
+    },
+    {
+      "releaseVersion": "0.2.8",
+      "edition": "Enhanced",
+      "manifest": "0.2.8-enhanced.json",
+      "artifact": "ReactorV-0.2.8-enhanced-live-test.zip",
+      "packageSha256": "33f2bb6e38b9036e4024ce8ad047e0fb5d6531ce8eb4e9bbf6b16bdfcab0ca0d",
+      "identityAnchors": [
+        {
+          "path": "ReactorV.Bootstrap.asi",
+          "sha256": "5d29b6f602bb779cc1cec2d877622033f43914684e5299960a7ece9e6bad9a08",
+          "length": 415232
+        },
+        {
+          "path": "ReactorV.RenderHook.asi",
+          "sha256": "ff71b0b2db45566ab41c72866603e57b93224c5c0e97d7d88bea06e842df837a",
+          "length": 349184
+        },
+        {
+          "path": "ReactorV.ScriptProbe.asi",
+          "sha256": "5706594020ea0b8e2c12c1dfa5f6620f3c2d01161308fea64e68b12537d0796e",
+          "length": 119808
+        },
+        {
+          "path": "plugins/ReactorV/RageWebUI.Native.dll",
+          "sha256": "cbdc11e94cd06ec46f45139448316e9c586851e17c7390f5158f57a51889daa1",
+          "length": 505856
+        },
+        {
+          "path": "plugins/ReactorV/ReactorV.Preloader.exe",
+          "sha256": "10ea84fbce5115329be5186d6cf981318467beee9fa7daaefc99bfd6be370a4e",
+          "length": 203776
+        },
+        {
+          "path": "scripts/ReactorV/ReactorV.contract.json",
+          "sha256": "55b731e1d9edc25f1b28c62375c64ff729c5e6aeb93ca05327c0ad4e034c85cb",
+          "length": 256
+        },
+        {
+          "path": "plugins/ReactorV/ReactorV.EnhancedLiveTest.json",
+          "sha256": "af6955d4399df622d24ed6eb7a1c0a4d77df5f30737bd4cf9345c78470ff35f8",
+          "length": 386
+        }
+      ]
+    },
+    {
+      "releaseVersion": "0.2.8",
+      "edition": "Legacy",
+      "manifest": "0.2.8-legacy.json",
+      "artifact": "ReactorV-0.2.8-legacy-live-test.zip",
+      "packageSha256": "1a58063427141414f53608ae98058943cc7bd7efa49678b20b86d1e0c4b858f3",
+      "identityAnchors": [
+        {
+          "path": "ReactorV.Bootstrap.asi",
+          "sha256": "5d29b6f602bb779cc1cec2d877622033f43914684e5299960a7ece9e6bad9a08",
+          "length": 415232
+        },
+        {
+          "path": "ReactorV.RenderHook.asi",
+          "sha256": "ff71b0b2db45566ab41c72866603e57b93224c5c0e97d7d88bea06e842df837a",
+          "length": 349184
+        },
+        {
+          "path": "ReactorV.ScriptProbe.asi",
+          "sha256": "5706594020ea0b8e2c12c1dfa5f6620f3c2d01161308fea64e68b12537d0796e",
+          "length": 119808
+        },
+        {
+          "path": "plugins/ReactorV/RageWebUI.Native.dll",
+          "sha256": "cbdc11e94cd06ec46f45139448316e9c586851e17c7390f5158f57a51889daa1",
+          "length": 505856
+        },
+        {
+          "path": "plugins/ReactorV/ReactorV.Preloader.exe",
+          "sha256": "10ea84fbce5115329be5186d6cf981318467beee9fa7daaefc99bfd6be370a4e",
+          "length": 203776
+        },
+        {
+          "path": "scripts/ReactorV/ReactorV.contract.json",
+          "sha256": "55b731e1d9edc25f1b28c62375c64ff729c5e6aeb93ca05327c0ad4e034c85cb",
+          "length": 256
+        },
+        {
+          "path": "plugins/ReactorV/ReactorV.LegacyLiveTest.json",
+          "sha256": "890489d2cfde0d8acf659bd5eb632d3815d6ff82f3381178bbaabfe82763883e",
+          "length": 361
+        }
+      ]
     }
   ]
 }
