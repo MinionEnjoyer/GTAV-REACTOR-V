@@ -1385,6 +1385,21 @@ namespace RageWebUI.Harness
                     continue;
                 }
 
+                // Visibility is observed through the desktop window list, but
+                // PrintWindow must target the OverlayWindow owned by this
+                // synthetic GTA host. The external preloader can publish the
+                // visible window a message turn before ownership is enumerable.
+                // Do not turn that bounded setup race into an unchecked visual
+                // sample: wait for the same capture prerequisite used by the
+                // close gate, while preserving the handoff deadline and every
+                // subsequent pixel/identity assertion.
+                if (!visualCapture.CanCapture(host))
+                {
+                    stableGbaySinceMilliseconds = null;
+                    Thread.Sleep(5);
+                    continue;
+                }
+
                 sawVisibleFrame = true;
                 using var image = visualCapture.Capture(host);
                 var frame = GbayLifecycleHarness.VisualFrame.Measure(image);

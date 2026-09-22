@@ -82,6 +82,7 @@ public sealed class BootstrapHarnessPresentationSourceContractTests
             handoff);
         Assert.Contains("gbayPhaseEntered |= frame.IsGbay;", handoff);
         Assert.Contains("stableGbaySinceMilliseconds = null;", handoff);
+        Assert.Contains("if (!visualCapture.CanCapture(host))", handoff);
         Assert.Contains(
             "GbayPresentationTimingPolicy.HasStableHandoffSettled(",
             handoff);
