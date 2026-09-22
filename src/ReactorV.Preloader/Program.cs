@@ -2916,7 +2916,22 @@ namespace ReactorV.Preloader
                 ProviderPresentationCommitContract.IsValidPresentationId(
                     _awaitingExternalPostAcceptPaintPresentationId) ||
                 ProviderPresentationCommitContract.IsValidPresentationId(
-                    _externalReplacementPresentationId);
+                    _externalReplacementPresentationId) ||
+                // The post-accept callback clears its awaiting field before
+                // starting the exact-ID external refresh. During that narrow
+                // fresh-frame interval there is no retained replacement yet,
+                // but republishing the initializer would still revoke the
+                // authenticated provider handoff. Bind this suppression to
+                // both the current provider session and the exact fresh ID;
+                // stale dual-browser evidence cannot hold recovery open.
+                (_dualBrowserReadyProviderSessionGeneration ==
+                     Volatile.Read(ref _providerSessionGeneration) &&
+                 ProviderPresentationCommitContract.IsValidPresentationId(
+                     _dualBrowserReadyPresentationId) &&
+                 string.Equals(
+                     _externalFreshPresentationId,
+                     _dualBrowserReadyPresentationId,
+                     StringComparison.Ordinal));
             if (DeferredNativeSurfaceIntent.ShouldReprovePublishedSurface(
                     ready, _browserPresentationRequestedVisible,
                     IsNativeBootstrapSurface(_hostSurfaceMode),

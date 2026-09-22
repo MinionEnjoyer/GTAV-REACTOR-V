@@ -132,6 +132,22 @@ public sealed class BootstrapHarnessPresentationSourceContractTests
     }
 
     [Fact]
+    public void External_fresh_provider_frame_keeps_initializer_reproof_fenced_to_the_current_session()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ReactorV.Preloader", "Program.cs"));
+        var readiness = MethodRegion(
+            source,
+            "private void ObserveExternalInitializerReadiness(",
+            "private bool TryCompleteHostSurfaceReveal(");
+
+        Assert.Contains("_dualBrowserReadyProviderSessionGeneration ==", readiness);
+        Assert.Contains("Volatile.Read(ref _providerSessionGeneration)", readiness);
+        Assert.Contains("_externalFreshPresentationId", readiness);
+        Assert.Contains("_dualBrowserReadyPresentationId", readiness);
+    }
+
+    [Fact]
     public void Packaged_native_telemetry_is_preserved_outside_player_staging_before_leak_scan()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "build-package.ps1"));
